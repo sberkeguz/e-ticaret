@@ -3,6 +3,7 @@ package com.sarikaya.e_ticaret;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
+
 @SpringBootApplication
 public class ETicaretApplication {
 
@@ -10,4 +11,5 @@ public class ETicaretApplication {
 		SpringApplication.run(ETicaretApplication.class, args);
 	}
 
-}
+
+	}
