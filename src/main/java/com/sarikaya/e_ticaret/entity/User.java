@@ -55,13 +55,14 @@ public class User implements UserDetails {
     // @Override: UserDetails arayüzünden (interface) zorunlu olarak gelen kuralları ezdiğimizi ve kendi mantığımıza göre doldurduğumuzu belirtir.
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Kullanıcının Enum rolünü (örneğin USER), Spring Security'nin tanıyabileceği SimpleGrantedAuthority nesnesine dönüştürüp liste olarak veriyoruz.
-        return List.of(new SimpleGrantedAuthority(role.name()));
+        // Spring Security'de hasRole("ADMIN") kontrolü "ROLE_ADMIN" yetkisini arar.
+        // Bu yüzden enum değerinin başına "ROLE_" ekliyoruz (USER -> ROLE_USER, ADMIN -> ROLE_ADMIN).
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
 
     // Hesap süresinin dolup dolmadığını kontrol eder. true = süresiz geçerli.
     @Override
-    public boolean isAccountNonExpired(){return true;}
+    public boolean isAccountNonExpired() { return true; }
 
     // Hesabın kilitli olup olmadığını kontrol eder. true = kilitli değil.
     @Override
@@ -69,7 +70,7 @@ public class User implements UserDetails {
 
     // Şifrenin kullanım süresinin dolup dolmadığını kontrol eder. true = şifre geçerli.
     @Override
-    public boolean isCredentialsNonExpired(){return true;}
+    public boolean isCredentialsNonExpired() { return true; }
 
     // Hesabın aktif/kullanılabilir olup olmadığını kontrol eder.
     // Eskiden sabit "true" diyorduk, artık veritabanındaki isActive durumuna bakacak.
