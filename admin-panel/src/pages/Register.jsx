@@ -19,7 +19,8 @@ export default function Register() {
             });
 
             if (!res.ok) {
-                setError("Kayıt başarısız. Bu kullanıcı adı alınmış olabilir.");
+                const err = await res.json().catch(() => null);
+                setError(err?.message || "Kayıt başarısız.");
                 return;
             }
 

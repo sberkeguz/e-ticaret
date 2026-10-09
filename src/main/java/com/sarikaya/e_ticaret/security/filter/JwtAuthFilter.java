@@ -20,8 +20,8 @@ import java.io.IOException;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
-    // UserDetailsService yerine doğrudan repository kullanıyoruz.
-    // Yoksa SecurityConfig <-> JwtAuthFilter arasında döngüsel bağımlılık oluşur.
+    // UserDetailsService yerine doğrudan repository kullanıyoruz
+    // Yoksa SecurityConfig <-> JwtAuthFilter arasında döngüsel bağımlılık oluşur
     private final UserRepository userRepository;
 
     @Override
@@ -31,7 +31,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         String authHeader = request.getHeader("Authorization");
 
-        // Token yoksa dokunma, istek devam etsin (yetki kontrolünü Spring yapar)
+        // Token yoksa dokunma istek devam etsin
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;

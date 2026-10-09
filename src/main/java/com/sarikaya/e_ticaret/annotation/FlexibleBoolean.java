@@ -8,22 +8,17 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-// RUNTIME: Annotation uygulama çalışırken de okunabilsin.
-// Jackson bunu çalışma anında okuduğu için bu şart. Yoksa annotation görmezden gelinir.
 @Retention(RetentionPolicy.RUNTIME)
 
-// Nereye konabileceğini sınırlar: alan, metot veya parametre üzerine.
+// @Target => nerelerde çalışacağına karar verir
 @Target({ElementType.FIELD, ElementType.METHOD, ElementType.PARAMETER})
 
-// Jackson'a "bu annotation'ın üzerindeki diğer Jackson annotation'larını da uygula" der.
-// Bu sayede aşağıdaki @JsonDeserialize, @FlexibleBoolean yazınca otomatik devreye girer.
+// @JacksonAnnotationsInside=> bundle
 @JacksonAnnotationsInside
 
-// Asıl bağlantı burada: bu annotation'lı alanı doldururken
-// Jackson varsayılan dönüştürücü yerine bizim FlexibleBooleanDeserializer'ı kullansın.
+// @JsonDeserialize =>FlexibleBooleanDeserializer sınıfındaki kuralların uygulanmasını söyler
 @JsonDeserialize(using = FlexibleBooleanDeserializer.class)
 
-// @interface: Bu bir annotation tanımıdır. İçi boş çünkü sadece "etiket" görevi görüyor.
-// Tüm iş yukarıdaki meta-annotation'larla ve deserializer sınıfıyla yapılıyor.
+// public @interface FlexibleBoolean: Kendi anotasyonumuzun tanımlanır
 public @interface FlexibleBoolean {
 }

@@ -37,7 +37,7 @@ public class JwtService {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    // Token'ın içindeki bilgileri (claims) okur.
+    // Token'ın içindeki bilgileri okur.
     // İmza yanlışsa veya süre dolduysa hata fırlatır (JwtAuthFilter bunu yakalıyor).
     private Claims extractAllClaims(String token) {
         return Jwts.parserBuilder()

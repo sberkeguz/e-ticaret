@@ -48,7 +48,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         // Login, register ve hata sayfası herkese açık
-                        .requestMatchers("/api/auth/**", "/error").permitAll()
+                        .requestMatchers("/api/auth/**", "/api/user/**", "/error").permitAll()
                         // Admin endpoint'leri sadece ADMIN rolüne açık
                         // (User.getAuthorities içinde "ROLE_" + role.name() olmalı)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

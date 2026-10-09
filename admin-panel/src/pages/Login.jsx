@@ -19,7 +19,8 @@ export default function Login() {
             });
 
             if (!res.ok) {
-                setError("Kullanıcı adı veya şifre hatalı.");
+                const err = await res.json().catch(() => null);
+                setError(err?.message || "Giriş başarısız.");
                 return;
             }
 

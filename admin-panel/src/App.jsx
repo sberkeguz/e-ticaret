@@ -2,8 +2,11 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import UserHome from "./pages/UserHome";
-import AdminPanel from "./pages/AdminPanel";
 import ProtectedRoute from "./ProtectedRoute";
+import AdminPanel from "./pages/AdminPanel";
+import AdminBrand from "./pages/AdminBrand";
+import AdminUsers from "./pages/AdminUsers";
+import AdminCategory from "./pages/AdminCategory";
 
 export default function App() {
     return (
@@ -11,7 +14,6 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
-            {/* Sadece ADMIN girebilir */}
             <Route
                 path="/admin"
                 element={
@@ -21,7 +23,34 @@ export default function App() {
                 }
             />
 
-            {/* Giriş yapmış herkes girebilir */}
+            <Route
+                path="/admin/brand"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminBrand />
+                    </ProtectedRoute>
+                }
+            />
+
+            {/* Kategori yönetimi - sadece ADMIN */}
+            <Route
+                path="/admin/category"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminCategory />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/admin/users"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminUsers />
+                    </ProtectedRoute>
+                }
+            />
+
             <Route
                 path="/home"
                 element={
