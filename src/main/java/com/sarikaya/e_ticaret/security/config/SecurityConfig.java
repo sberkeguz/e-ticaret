@@ -1,6 +1,6 @@
 package com.sarikaya.e_ticaret.security.config;
 
-import com.sarikaya.e_ticaret.repository.UserRepository;
+import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import com.sarikaya.e_ticaret.security.filter.JwtAuthFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -67,7 +67,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         // Sadece React'in çalıştığı porta izin veriyoruz
-        configuration.setAllowedOrigins(List.of("http://localhost:5173"));
+        configuration.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000"));
         // İzin verilen HTTP metotları
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         // React'in gönderebileceği header'lar

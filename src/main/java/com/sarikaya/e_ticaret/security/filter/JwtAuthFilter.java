@@ -1,7 +1,7 @@
 package com.sarikaya.e_ticaret.security.filter;
 
-import com.sarikaya.e_ticaret.repository.UserRepository;
-import com.sarikaya.e_ticaret.security.service.JwtService;
+import com.sarikaya.e_ticaret.user.repository.UserRepository;
+import com.sarikaya.e_ticaret.auth.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
