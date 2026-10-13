@@ -1,6 +1,6 @@
 package com.sarikaya.e_ticaret.catalog.controller.user;
 
-import com.sarikaya.e_ticaret.catalog.entity.Category;
+import com.sarikaya.e_ticaret.catalog.dto.CategoryResponse;
 import com.sarikaya.e_ticaret.catalog.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,12 @@ public class UserCategoryController {
 
     // Sadece listeleme
     @GetMapping
-    public ResponseEntity<List<Category>> getCategories() {
-        return ResponseEntity.ok(categoryRepository.findAll());
+    public ResponseEntity<List<CategoryResponse>> getCategories() {
+        List<CategoryResponse> categories = categoryRepository.findAll()
+                .stream()
+                .map(CategoryResponse::from)
+                .toList();
+
+        return ResponseEntity.ok(categories);
     }
 }

@@ -10,7 +10,7 @@ export default function UserHome() {
 
     // Sunucudan gelen veriler
     const [brands, setBrands] = useState([]);
-    const [categories, setCategories] = useState([]); // düz liste: {id, name, parentId}
+    const [categories, setCategories] = useState([]); // düz liste: {id, name, parentIds}
     const [latest, setLatest] = useState([]);
     const [results, setResults] = useState([]);
     const [error, setError] = useState("");
@@ -63,7 +63,10 @@ export default function UserHome() {
             if (seen.has(id)) return;
             seen.add(id);
             ids.push(id);
-            categories.filter((c) => c.parentId === id).forEach((c) => walk(c.id));
+            // Bir çocuk birden fazla üst kategoriye bağlı olabileceğinden parentIds listesini kontrol et.
+            categories
+                .filter((c) => (c.parentIds ?? []).includes(id))
+                .forEach((c) => walk(c.id));
         };
         walk(rootId);
         return ids;
@@ -100,7 +103,12 @@ export default function UserHome() {
     }, [search, brandIds, categoryPath, minPrice, maxPrice, inStock, categories]);
 
     // Kategori çubuğunun satırları: kökler, seçilen kategorinin çocukları, onun çocukları...
-    const childrenOf = (parentId) => categories.filter((c) => (c.parentId ?? null) === parentId);
+    const childrenOf = (parentId) =>
+        categories.filter((c) =>
+            parentId === null
+                ? (c.parentIds ?? []).length === 0
+                : (c.parentIds ?? []).includes(parentId)
+        );
     const rows = [];
     let parent = null;
     for (let level = 0; level <= categoryPath.length; level++) {

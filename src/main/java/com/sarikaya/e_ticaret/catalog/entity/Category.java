@@ -5,8 +5,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "categories")
@@ -22,10 +22,14 @@ public class Category {
     @Column(nullable = false)
     private String name;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id")
-    private Category parent;
+@ManyToMany
+@JoinTable(
+        name = "category_parents",
+        joinColumns = @JoinColumn(name = "category_id"),
+        inverseJoinColumns =  @JoinColumn(name = "parent_id")
+)
+    private Set<Category> parents = new LinkedHashSet<>();
 
-    @OneToMany(mappedBy = "parent")
-    private List<Category> children = new ArrayList<>();
+@ManyToMany(mappedBy = "parents")
+    private Set<Category> children = new LinkedHashSet<>();
 }

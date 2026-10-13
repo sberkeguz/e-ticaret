@@ -6,8 +6,8 @@ import { apiFetch } from "../api";
 export default function AdminCategory() {
     const [categories, setCategories] = useState([]);
     const [name, setName] = useState("");
-    // Alt kategori mantığı için eklendi
-    const [parentId, setParentId] = useState(""); 
+    // Kategori birden fazla üst kategoriye bağlanabilir.
+    const [parentIds, setParentIds] = useState([]);
     
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
@@ -15,7 +15,7 @@ export default function AdminCategory() {
     // Düzenleme durumu
     const [editingId, setEditingId] = useState(null);
     const [editName, setEditName] = useState("");
-    const [editParentId, setEditParentId] = useState(""); // Düzenlerken üst kategoriyi değiştirmek için
+    const [editParentIds, setEditParentIds] = useState([]); // Düzenlenen kategorinin üst kategorileri
 
     // Sunucunun gönderdiği "message" alanını okur
     const readError = async (res, fallback) => {
@@ -47,10 +47,10 @@ export default function AdminCategory() {
         try {
             const res = await apiFetch("/api/admin/categories", {
                 method: "POST",
-                // parentId boş string ise null gönderiyoruz
-                body: JSON.stringify({ 
+                // Seçilen tüm üst kategori ID'lerini backend'e parentIds listesi olarak gönder.
+                body: JSON.stringify({
                     name: name.trim(),
-                    parentId: parentId ? Number(parentId) : null
+                    parentIds: parentIds.map(Number)
                 }),
             });
             if (!res.ok) {
@@ -58,9 +58,9 @@ export default function AdminCategory() {
                 return;
             }
             const saved = await res.json();
-            setCategories([...categories, saved]);
+            setCategories((current) => [...current, saved]);
             setName("");
-            setParentId(""); // Başarıyla eklenince select kutusunu da sıfırla
+            setParentIds([]); // Başarıyla eklenince üst kategori seçimini temizle
         } catch {
             setError("Sunucuya ulaşılamadı.");
         }
@@ -70,13 +70,14 @@ export default function AdminCategory() {
         setError("");
         setEditingId(c.id);
         setEditName(c.name);
-        setEditParentId(c.parentId || ""); // Düzenleme modunda mevcut parentId'yi al
+        // API'den gelen sayısal ID'leri select bileşeninin string değerlerine çevir.
+        setEditParentIds((c.parentIds ?? []).map(String));
     };
 
     const cancelEdit = () => {
         setEditingId(null);
         setEditName("");
-        setEditParentId("");
+        setEditParentIds([]);
     };
 
     // Güncelle: PUT
@@ -89,9 +90,10 @@ export default function AdminCategory() {
         try {
             const res = await apiFetch(`/api/admin/categories/${id}`, {
                 method: "PUT",
-                body: JSON.stringify({ 
+                // Güncellemede seçilmiş üst kategorilerin tamamını gönder.
+                body: JSON.stringify({
                     name: editName.trim(),
-                    parentId: editParentId ? Number(editParentId) : null 
+                    parentIds: editParentIds.map(Number)
                 }),
             });
             if (!res.ok) {
@@ -99,7 +101,7 @@ export default function AdminCategory() {
                 return;
             }
             const updated = await res.json();
-            setCategories(categories.map((c) => (c.id === id ? updated : c)));
+            setCategories((current) => current.map((c) => (c.id === id ? updated : c)));
             cancelEdit();
         } catch {
             setError("Sunucuya ulaşılamadı.");
@@ -138,20 +140,25 @@ export default function AdminCategory() {
                         onChange={(e) => setName(e.target.value)}
                     />
                     
-                    {/* YENİ EKLENEN SELECT KUTUSU BURADA */}
-                    <select 
-                        style={styles.input} 
-                        value={parentId} 
-                        onChange={(e) => setParentId(e.target.value)}
+                    {/* Ctrl tuşuyla birden fazla üst kategori seçilebilir. */}
+                    <select
+                        style={styles.input}
+                        multiple
+                        size={4}
+                        aria-label="Üst kategoriler"
+                        value={parentIds}
+                        onChange={(e) =>
+                            setParentIds(Array.from(e.target.selectedOptions, (option) => option.value))
+                        }
                     >
-                        <option value="">Üst kategori yok</option>
                         {categories.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
+                            <option key={c.id} value={String(c.id)}>{c.name}</option>
                         ))}
                     </select>
 
                     <button style={styles.add} type="submit">Ekle</button>
                 </form>
+                <small>Birden fazla üst kategori seçmek için Ctrl tuşuna basılı tutun. Seçim yapmazsanız kategori kök olur.</small>
 
                 {error && <p style={styles.error}>{error}</p>}
 
@@ -171,8 +178,10 @@ export default function AdminCategory() {
                         </thead>
                         <tbody>
                         {categories.map((c) => {
-                            // Üst kategori adını tabloda göstermek için buluyoruz
-                            const parentCat = categories.find(p => p.id === c.parentId);
+                            // parentIds listesindeki ID'leri kategori adlarıyla eşleştiriyoruz.
+                            const parentNames = categories
+                                .filter((p) => (c.parentIds ?? []).some((id) => String(id) === String(p.id)))
+                                .map((p) => p.name);
 
                             return (
                                 <tr key={c.id}>
@@ -198,20 +207,26 @@ export default function AdminCategory() {
                                     {/* Tabloda Üst Kategori Gösterimi / Düzenlemesi */}
                                     <td style={styles.td}>
                                         {editingId === c.id ? (
-                                            <select 
-                                                style={styles.editInput} 
-                                                value={editParentId} 
-                                                onChange={(e) => setEditParentId(e.target.value)}
+                                            <select
+                                                style={styles.editInput}
+                                                multiple
+                                                size={4}
+                                                aria-label={`${c.name} için üst kategoriler`}
+                                                value={editParentIds}
+                                                onChange={(e) =>
+                                                    setEditParentIds(Array.from(e.target.selectedOptions, (option) => option.value))
+                                                }
                                             >
-                                                <option value="">Üst kategori yok</option>
                                                 {categories
-                                                    .filter(cat => cat.id !== c.id) // Kendisini üst kategori seçemesin diye
+                                                    .filter((cat) => cat.id !== c.id)
                                                     .map((cat) => (
-                                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                                ))}
+                                                        <option key={cat.id} value={String(cat.id)}>{cat.name}</option>
+                                                    ))}
                                             </select>
                                         ) : (
-                                            parentCat ? parentCat.name : <span style={{ color: '#999' }}>-</span>
+                                            parentNames.length > 0
+                                                ? parentNames.join(", ")
+                                                : <span style={{ color: "#999" }}>-</span>
                                         )}
                                     </td>
 
