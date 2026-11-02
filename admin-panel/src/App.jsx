@@ -7,6 +7,7 @@ import AdminPanel from "./pages/AdminPanel";
 import AdminBrand from "./pages/AdminBrand";
 import AdminUsers from "./pages/AdminUsers";
 import AdminCategory from "./pages/AdminCategory";
+import AdminProducts from "./pages/AdminProducts";
 
 export default function App() {
     return (
@@ -47,6 +48,15 @@ export default function App() {
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
                         <AdminUsers />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/admin/products"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminProducts />
                     </ProtectedRoute>
                 }
             />

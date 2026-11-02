@@ -22,6 +22,7 @@ export default function AdminPanel() {
             <nav style={styles.menu}>
                 <Link to="/admin/brand" style={styles.item}>Markalar</Link>
                 <Link to="/admin/category" style={styles.item}>Kategoriler</Link>
+                <Link to="/admin/products" style={styles.item}>Ürünler</Link>
                 <Link to="/admin/users" style={styles.item}>Kullanıcılar</Link>
             </nav>
         </div>
