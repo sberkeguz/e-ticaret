@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/audit/entity/LoginHistory.java
 package com.sarikaya.e_ticaret.audit.entity;
+========
+package com.sarikaya.e_ticaret.user.entity;
+>>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/user/entity/LoginHistory.java
 
 import jakarta.persistence.*;
 import lombok.*;

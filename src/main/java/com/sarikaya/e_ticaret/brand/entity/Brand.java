@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/brand/entity/Brand.java
 package com.sarikaya.e_ticaret.brand.entity;
+========
+package com.sarikaya.e_ticaret.catalog.entity;
+>>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/catalog/entity/Brand.java
 
 import jakarta.persistence.*;
 import lombok.Data;

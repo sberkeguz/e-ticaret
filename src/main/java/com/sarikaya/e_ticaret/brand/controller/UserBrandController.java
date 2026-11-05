@@ -1,7 +1,14 @@
+<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/brand/controller/UserBrandController.java
 package com.sarikaya.e_ticaret.brand.controller;
 
 import com.sarikaya.e_ticaret.brand.entity.Brand;
 import com.sarikaya.e_ticaret.brand.repository.BrandRepository;
+========
+package com.sarikaya.e_ticaret.catalog.controller.user;
+
+import com.sarikaya.e_ticaret.catalog.entity.Brand;
+import com.sarikaya.e_ticaret.catalog.repository.BrandRepository;
+>>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/catalog/controller/user/UserBrandController.java
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;

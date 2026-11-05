@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/exception/ResourceNotFoundException.java
 package com.sarikaya.e_ticaret.exception;
+========
+package com.sarikaya.e_ticaret.common.exception;
+>>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/common/exception/ResourceNotFoundException.java
 
 import org.springframework.http.HttpStatus;
 

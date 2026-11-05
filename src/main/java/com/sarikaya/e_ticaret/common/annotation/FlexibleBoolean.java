@@ -1,4 +1,4 @@
-package com.sarikaya.e_ticaret.annotation;
+package com.sarikaya.e_ticaret.common.annotation;
 
 import com.fasterxml.jackson.annotation.JacksonAnnotationsInside;
 import tools.jackson.databind.annotation.JsonDeserialize;

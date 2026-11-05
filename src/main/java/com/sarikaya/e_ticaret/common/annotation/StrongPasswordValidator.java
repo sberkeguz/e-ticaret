@@ -1,4 +1,4 @@
-package com.sarikaya.e_ticaret.annotation;
+package com.sarikaya.e_ticaret.common.annotation;
 
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
