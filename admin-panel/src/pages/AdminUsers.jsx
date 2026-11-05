@@ -1,380 +1,283 @@
-import { Fragment, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 
 const ROLES = ["USER", "ADMIN"];
+const formatDate = (value) => value
+    ? new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" })
+    : "Henüz giriş yok";
+const readError = async (response, fallback) => {
+    const body = await response.json().catch(() => null);
+    return body?.message || fallback;
+};
 
 export default function AdminUsers() {
+    const navigate = useNavigate();
     const [users, setUsers] = useState([]);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
-
-    // Düzenleme durumu
-    const [editingId, setEditingId] = useState(null);
-    const [form, setForm] = useState({ username: "", role: "USER", password: "" });
-
-    // Yeni kullanıcı formu
+    const [search, setSearch] = useState("");
+    const [creating, setCreating] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [newUser, setNewUser] = useState({ username: "", password: "", role: "USER" });
-
-    // Giriş geçmişi: hangi kullanıcının geçmişi açık
-    const [historyId, setHistoryId] = useState(null);
+    const [modalMode, setModalMode] = useState(null);
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [form, setForm] = useState({ username: "", role: "USER", password: "" });
     const [history, setHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
-
     const currentUsername = localStorage.getItem("username");
 
-    const formatDate = (iso) => (iso ? new Date(iso).toLocaleString("tr-TR") : "Hiç girmedi");
-
-    // Sunucunun gönderdiği "message" alanını okur
-    const readError = async (res, fallback) => {
-        const err = await res.json().catch(() => null);
-        return err?.message || fallback;
-    };
-
     useEffect(() => {
-        const load = async () => {
-            try {
-                const res = await apiFetch("/api/admin/users");
-                if (!res.ok) throw new Error();
-                setUsers(await res.json());
-            } catch {
-                setError("Kullanıcılar yüklenemedi.");
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
+        let active = true;
+        apiFetch("/api/admin/users")
+            .then(async (response) => {
+                if (!response.ok) throw new Error(await readError(response, "Kullanıcılar yüklenemedi."));
+                const data = await response.json();
+                if (active) setUsers(data);
+            })
+            .catch((loadError) => { if (active) setError(loadError.message || "Kullanıcılar yüklenemedi."); })
+            .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
     }, []);
 
-    const startEdit = (u) => {
+    useEffect(() => {
+        if (!modalMode) return undefined;
+        const closeOnEscape = (event) => { if (event.key === "Escape") setModalMode(null); };
+        window.addEventListener("keydown", closeOnEscape);
+        return () => window.removeEventListener("keydown", closeOnEscape);
+    }, [modalMode]);
+
+    const filteredUsers = useMemo(() => users.filter((user) =>
+        user.username.toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr"))
+    ), [users, search]);
+
+    const replaceUser = (updated) => setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
+
+    const createUser = async (event) => {
+        event.preventDefault();
         setError("");
-        setEditingId(u.id);
-        setForm({ username: u.username, role: u.role, password: "" });
-    };
-
-    const cancelEdit = () => setEditingId(null);
-
-    // Güncellenen kullanıcıyı listede yerine koy
-    const replaceUser = (updated) =>
-        setUsers(users.map((u) => (u.id === updated.id ? updated : u)));
-
-    // Yeni kullanıcı ekle: POST
-    const handleCreate = async (e) => {
-        e.preventDefault();
-        setError("");
+        setCreating(true);
         try {
-            const res = await apiFetch("/api/admin/users", {
+            const response = await apiFetch("/api/admin/users", {
                 method: "POST",
                 body: JSON.stringify(newUser),
             });
-            if (!res.ok) {
-                setError(await readError(res, "Kullanıcı eklenemedi."));
-                return;
-            }
-            const created = await res.json();
-            setUsers([...users, created]);
+            if (!response.ok) throw new Error(await readError(response, "Kullanıcı eklenemedi."));
+            const created = await response.json();
+            setUsers((current) => [...current, created]);
             setNewUser({ username: "", password: "", role: "USER" });
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
+        } catch (requestError) {
+            setError(requestError.message || "Sunucuya ulaşılamadı.");
+        } finally {
+            setCreating(false);
         }
     };
 
-    // Bilgileri kaydet: PUT
-    const handleSave = async (id) => {
+    const openEdit = (user) => {
         setError("");
+        setSelectedUser(user);
+        setForm({ username: user.username, role: user.role, password: "" });
+        setModalMode("edit");
+    };
+
+    const saveUser = async (event) => {
+        event.preventDefault();
         if (!form.username.trim()) {
             setError("Kullanıcı adı boş olamaz.");
             return;
         }
+        setSaving(true);
+        setError("");
         try {
-            const res = await apiFetch(`/api/admin/users/${id}`, {
+            const response = await apiFetch(`/api/admin/users/${selectedUser.id}`, {
                 method: "PUT",
                 body: JSON.stringify({
                     username: form.username.trim(),
                     role: form.role,
-                    password: form.password || null, // boşsa şifre değişmez
+                    password: form.password || null,
                 }),
             });
-            if (!res.ok) {
-                setError(await readError(res, "Kullanıcı güncellenemedi."));
-                return;
-            }
-            replaceUser(await res.json());
-            cancelEdit();
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
+            if (!response.ok) throw new Error(await readError(response, "Kullanıcı güncellenemedi."));
+            replaceUser(await response.json());
+            setModalMode(null);
+        } catch (requestError) {
+            setError(requestError.message || "Kullanıcı güncellenemedi.");
+        } finally {
+            setSaving(false);
         }
     };
 
-    // Aktif / pasif: PATCH
-    const handleToggle = async (u) => {
-        setError("");
-        try {
-            const res = await apiFetch(`/api/admin/users/${u.id}/active`, {
-                method: "PATCH",
-                body: JSON.stringify({ active: !u.active }),
-            });
-            if (!res.ok) {
-                setError(await readError(res, "Durum değiştirilemedi."));
-                return;
-            }
-            replaceUser(await res.json());
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
-        }
-    };
-
-    // Kullanıcı sil: DELETE
-    const handleDelete = async (u) => {
-        if (!window.confirm(`"${u.username}" kullanıcısı silinsin mi?`)) return;
-        setError("");
-        try {
-            const res = await apiFetch(`/api/admin/users/${u.id}`, { method: "DELETE" });
-            if (!res.ok) {
-                setError(await readError(res, "Kullanıcı silinemedi."));
-                return;
-            }
-            setUsers(users.filter((x) => x.id !== u.id));
-            if (editingId === u.id) cancelEdit();
-            if (historyId === u.id) setHistoryId(null);
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
-        }
-    };
-
-    // Giriş geçmişi: aynı butona tekrar basınca kapanır
-    const toggleHistory = async (u) => {
-        if (historyId === u.id) {
-            setHistoryId(null);
-            return;
-        }
-        setError("");
-        setHistoryId(u.id);
+    const openHistory = async (user) => {
+        setSelectedUser(user);
         setHistory([]);
         setHistoryLoading(true);
+        setModalMode("history");
+        setError("");
         try {
-            const res = await apiFetch(`/api/admin/users/${u.id}/logins`);
-            if (!res.ok) {
-                setError(await readError(res, "Giriş geçmişi yüklenemedi."));
-                setHistoryId(null);
-                return;
-            }
-            setHistory(await res.json());
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
-            setHistoryId(null);
+            const response = await apiFetch(`/api/admin/users/${user.id}/logins`);
+            if (!response.ok) throw new Error(await readError(response, "Giriş geçmişi yüklenemedi."));
+            setHistory(await response.json());
+        } catch (requestError) {
+            setError(requestError.message || "Giriş geçmişi yüklenemedi.");
         } finally {
             setHistoryLoading(false);
         }
     };
 
+    const toggleActive = async (user) => {
+        setError("");
+        try {
+            const response = await apiFetch(`/api/admin/users/${user.id}/active`, {
+                method: "PATCH",
+                body: JSON.stringify({ active: !user.active }),
+            });
+            if (!response.ok) throw new Error(await readError(response, "Kullanıcı durumu değiştirilemedi."));
+            replaceUser(await response.json());
+        } catch (requestError) {
+            setError(requestError.message || "Kullanıcı durumu değiştirilemedi.");
+        }
+    };
+
+    const deleteUser = async (user) => {
+        if (!window.confirm(`"${user.username}" kullanıcısı silinsin mi?`)) return;
+        setError("");
+        try {
+            const response = await apiFetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
+            if (!response.ok) throw new Error(await readError(response, "Kullanıcı silinemedi."));
+            setUsers((current) => current.filter((item) => item.id !== user.id));
+            if (selectedUser?.id === user.id) setModalMode(null);
+        } catch (requestError) {
+            setError(requestError.message || "Kullanıcı silinemedi.");
+        }
+    };
+
+    const activeCount = users.filter((user) => user.active).length;
+
     return (
-        <div style={styles.page}>
-            <Link to="/admin">← Admin Paneli</Link>
+        <>
+            <div className="page-heading">
+                <div>
+                    <div className="eyebrow">MAĞAZA TOPLULUĞU</div>
+                    <h1 className="page-title">Kullanıcılar</h1>
+                    <p className="page-subtitle">Hesapları, erişim rollerini ve giriş hareketlerini yönetin.</p>
+                </div>
+                <span className="badge badge-gray">{users.length} hesap</span>
+            </div>
 
-            <section style={styles.card}>
-                <h2 style={{ marginTop: 0 }}>Kullanıcılar</h2>
+            <section className="stat-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                <article className="surface stat-card"><span className="stat-icon">♙</span><span><span className="stat-value">{users.length}</span><span className="stat-label">Toplam kullanıcı</span></span></article>
+                <article className="surface stat-card"><span className="stat-icon" style={{ color: "var(--green)", background: "var(--mint)" }}>✓</span><span><span className="stat-value">{activeCount}</span><span className="stat-label">Aktif hesap</span></span></article>
+                <article className="surface stat-card"><span className="stat-icon" style={{ color: "var(--amber)", background: "#fff4e3" }}>◷</span><span><span className="stat-value">{users.length - activeCount}</span><span className="stat-label">Pasif hesap</span></span></article>
+            </section>
 
-                {/* Yeni kullanıcı ekleme formu */}
-                <form onSubmit={handleCreate} style={styles.createForm}>
-                    <input
-                        style={styles.input}
-                        placeholder="Kullanıcı adı"
-                        value={newUser.username}
-                        onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                    />
-                    <input
-                        style={styles.input}
-                        type="password"
-                        placeholder="Şifre (en az 5 karakter)"
-                        value={newUser.password}
-                        onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                    />
-                    <select
-                        style={styles.input}
-                        value={newUser.role}
-                        onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                    >
-                        {ROLES.map((r) => (
-                            <option key={r} value={r}>{r}</option>
-                        ))}
-                    </select>
-                    <button style={styles.save} type="submit">Ekle</button>
+            {error && <p className="error-banner" role="alert">{error}</p>}
+
+            <section className="surface surface-pad" style={{ marginBottom: 18 }}>
+                <div className="toolbar">
+                    <div><h2 className="section-title">Yeni kullanıcı</h2><p className="section-caption">Yönetici panelinden doğrudan hesap oluşturun.</p></div>
+                </div>
+                <form onSubmit={createUser} className="toolbar" style={{ alignItems: "flex-end", marginBottom: 0 }}>
+                    <label className="field" style={{ flex: 1 }}>
+                        <span className="field-label">Kullanıcı adı</span>
+                        <input className="input" required value={newUser.username} onChange={(event) => setNewUser((current) => ({ ...current, username: event.target.value }))} placeholder="Yeni kullanıcı adı" />
+                    </label>
+                    <label className="field" style={{ flex: 1 }}>
+                        <span className="field-label">Başlangıç şifresi</span>
+                        <input className="input" type="password" minLength={5} required value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} placeholder="En az 5 karakter" />
+                    </label>
+                    <label className="field" style={{ width: 145 }}>
+                        <span className="field-label">Rol</span>
+                        <select className="select" value={newUser.role} onChange={(event) => setNewUser((current) => ({ ...current, role: event.target.value }))}>
+                            {ROLES.map((role) => <option key={role} value={role}>{role === "ADMIN" ? "Yönetici" : "Kullanıcı"}</option>)}
+                        </select>
+                    </label>
+                    <button className="button button-primary" disabled={creating} type="submit">{creating ? "Ekleniyor…" : "+ Kullanıcı ekle"}</button>
                 </form>
+            </section>
 
-                {error && <p style={styles.error}>{error}</p>}
-
-                {loading ? (
-                    <p>Yükleniyor...</p>
-                ) : users.length === 0 ? (
-                    <p>Kullanıcı yok.</p>
+            <section className="surface surface-pad">
+                <div className="toolbar">
+                    <div><h2 className="section-title">Hesap listesi</h2><p className="section-caption">{filteredUsers.length} kullanıcı görüntüleniyor</p></div>
+                    <div className="search-field"><span className="search-glyph">⌕</span><input className="input" placeholder="Kullanıcı ara..." value={search} onChange={(event) => setSearch(event.target.value)} /></div>
+                </div>
+                {loading ? <div className="loading-state">Kullanıcılar yükleniyor…</div> : filteredUsers.length === 0 ? (
+                    <div className="empty-state"><div className="empty-icon">♙</div><h3>{search ? "Eşleşen hesap bulunamadı" : "Henüz kullanıcı yok"}</h3><p>Başka bir arama kelimesi deneyin veya yeni hesap oluşturun.</p></div>
                 ) : (
-                    <table style={styles.table}>
-                        <thead>
-                        <tr>
-                            <th style={styles.th}>ID</th>
-                            <th style={styles.th}>Kullanıcı adı</th>
-                            <th style={styles.th}>Rol</th>
-                            <th style={styles.th}>Yeni şifre</th>
-                            <th style={styles.th}>Durum</th>
-                            <th style={styles.th}>Son giriş</th>
-                            <th style={styles.th}></th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {users.map((u) => {
-                            const editing = editingId === u.id;
-                            const isSelf = u.username === currentUsername;
-
-                            return (
-                                <Fragment key={u.id}>
-                                    <tr>
-                                        <td style={styles.td}>{u.id}</td>
-
-                                        <td style={styles.td}>
-                                            {editing ? (
-                                                <input
-                                                    style={styles.input}
-                                                    value={form.username}
-                                                    // Kendi kullanıcı adını değiştirirsen token geçersiz olur, o yüzden kapalı
-                                                    disabled={isSelf}
-                                                    onChange={(e) => setForm({ ...form, username: e.target.value })}
-                                                />
-                                            ) : (
-                                                u.username
-                                            )}
-                                        </td>
-
-                                        <td style={styles.td}>
-                                            {editing ? (
-                                                <select
-                                                    style={styles.input}
-                                                    value={form.role}
-                                                    disabled={isSelf}
-                                                    onChange={(e) => setForm({ ...form, role: e.target.value })}
-                                                >
-                                                    {ROLES.map((r) => (
-                                                        <option key={r} value={r}>{r}</option>
-                                                    ))}
-                                                </select>
-                                            ) : (
-                                                u.role
-                                            )}
-                                        </td>
-
-                                        <td style={styles.td}>
-                                            {editing ? (
-                                                <input
-                                                    style={styles.input}
-                                                    type="password"
-                                                    placeholder="Boş = değişmez"
-                                                    value={form.password}
-                                                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                                                />
-                                            ) : (
-                                                "••••••"
-                                            )}
-                                        </td>
-
-                                        <td style={styles.td}>
-                                            <span style={u.active ? styles.on : styles.off}>
-                                                {u.active ? "Aktif" : "Pasif"}
-                                            </span>
-                                        </td>
-
-                                        <td style={styles.td}>{formatDate(u.lastLoginAt)}</td>
-
-                                        <td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
-                                            {editing ? (
-                                                <>
-                                                    <button style={styles.save} onClick={() => handleSave(u.id)}>Kaydet</button>
-                                                    <button style={styles.gray} onClick={cancelEdit}>İptal</button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <button style={styles.gray} onClick={() => startEdit(u)}>Düzenle</button>
-                                                    <button style={styles.gray} onClick={() => toggleHistory(u)}>
-                                                        {historyId === u.id ? "Gizle" : "Girişler"}
-                                                    </button>
-                                                    <button
-                                                        style={u.active ? styles.danger : styles.save}
-                                                        disabled={isSelf}
-                                                        title={isSelf ? "Kendi hesabını pasif yapamazsın" : ""}
-                                                        onClick={() => handleToggle(u)}
-                                                    >
-                                                        {u.active ? "Pasif yap" : "Aktif yap"}
-                                                    </button>
-                                                    <button
-                                                        style={styles.danger}
-                                                        disabled={isSelf}
-                                                        title={isSelf ? "Kendi hesabını silemezsin" : ""}
-                                                        onClick={() => handleDelete(u)}
-                                                    >
-                                                        Sil
-                                                    </button>
-                                                </>
-                                            )}
-                                        </td>
-                                    </tr>
-
-                                    {/* Giriş geçmişi satırı */}
-                                    {historyId === u.id && (
-                                        <tr>
-                                            <td colSpan={7} style={styles.historyCell}>
-                                                {historyLoading ? (
-                                                    "Yükleniyor..."
-                                                ) : history.length === 0 ? (
-                                                    "Giriş kaydı yok."
-                                                ) : (
-                                                    <table style={styles.table}>
-                                                        <thead>
-                                                        <tr>
-                                                            <th style={styles.th}>Tarih</th>
-                                                            <th style={styles.th}>IP</th>
-                                                            <th style={styles.th}>Tarayıcı</th>
-                                                        </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                        {history.map((h) => (
-                                                            <tr key={h.id}>
-                                                                <td style={styles.td}>{formatDate(h.loggedInAt)}</td>
-                                                                <td style={styles.td}>{h.ipAddress}</td>
-                                                                <td style={styles.td}>{h.userAgent}</td>
-                                                            </tr>
-                                                        ))}
-                                                        </tbody>
-                                                    </table>
-                                                )}
+                    <div className="table-wrap">
+                        <table className="data-table">
+                            <thead><tr><th>Kullanıcı</th><th>Rol</th><th>Durum</th><th>Son giriş</th><th>Siparişler</th><th style={{ textAlign: "right" }}>İşlemler</th></tr></thead>
+                            <tbody>
+                                {filteredUsers.map((user) => {
+                                    const isSelf = user.username === currentUsername;
+                                    return (
+                                        <tr key={user.id}>
+                                            <td><div className="user-chip"><span className="avatar small">{user.username.slice(0, 2)}</span><span><span className="cell-primary">{user.username}{isSelf ? " (siz)" : ""}</span><span className="cell-sub">Hesap #{user.id}</span></span></div></td>
+                                            <td><span className={`badge ${user.role === "ADMIN" ? "badge-amber" : "badge-gray"}`}>{user.role === "ADMIN" ? "Yönetici" : "Kullanıcı"}</span></td>
+                                            <td><span className={`badge ${user.active ? "badge-green" : "badge-gray"}`}>{user.active ? "Aktif" : "Pasif"}</span></td>
+                                            <td>
+                                                <button className="button button-quiet button-small" onClick={() => openHistory(user)}>
+                                                    {user.lastLoginAt ? formatDate(user.lastLoginAt) : "Giriş geçmişi"}
+                                                </button>
+                                            </td>
+                                            <td>
+                                                <button className="button button-quiet button-small" onClick={() => navigate(`/admin/orders?user=${encodeURIComponent(user.username)}`)}>Siparişler</button>
+                                            </td>
+                                            <td>
+                                                <div className="button-row" style={{ justifyContent: "flex-end" }}>
+                                                    <button className="button button-quiet button-small" onClick={() => openEdit(user)}>Düzenle</button>
+                                                    <button className={`button button-small ${user.active ? "button-quiet" : "button-primary"}`} disabled={isSelf} title={isSelf ? "Kendi hesabınızın durumunu değiştiremezsiniz." : ""} onClick={() => toggleActive(user)}>{user.active ? "Pasifleştir" : "Etkinleştir"}</button>
+                                                    <button className="button button-danger button-small" disabled={isSelf} title={isSelf ? "Kendi hesabınızı silemezsiniz." : ""} onClick={() => deleteUser(user)}>Sil</button>
+                                                </div>
                                             </td>
                                         </tr>
-                                    )}
-                                </Fragment>
-                            );
-                        })}
-                        </tbody>
-                    </table>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </section>
-        </div>
+
+            {modalMode && selectedUser && (
+                <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalMode(null); }}>
+                    {modalMode === "edit" ? (
+                        <form className="modal-card" onSubmit={saveUser}>
+                            <div className="modal-head">
+                                <div><h2>Kullanıcıyı düzenle</h2><p>{selectedUser.username} hesabının bilgilerini güncelleyin.</p></div>
+                                <button className="button button-quiet button-icon" type="button" aria-label="Kapat" onClick={() => setModalMode(null)}>×</button>
+                            </div>
+                            <div className="modal-body" style={{ display: "grid", gap: 15 }}>
+                                {error && <p className="error-banner" role="alert">{error}</p>}
+                                <label className="field"><span className="field-label">Kullanıcı adı</span><input className="input" autoFocus disabled={selectedUser.username === currentUsername} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} /></label>
+                                <label className="field"><span className="field-label">Rol</span><select className="select" disabled={selectedUser.username === currentUsername} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>{ROLES.map((role) => <option key={role} value={role}>{role === "ADMIN" ? "Yönetici" : "Kullanıcı"}</option>)}</select></label>
+                                <label className="field"><span className="field-label">Yeni şifre</span><input className="input" type="password" minLength={5} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Boş bırakılırsa değişmez" /></label>
+                            </div>
+                            <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setModalMode(null)}>Vazgeç</button><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Kaydediliyor…" : "Değişiklikleri kaydet"}</button></div>
+                        </form>
+                    ) : (
+                        <section className="modal-card modal-card-wide" aria-labelledby="history-title">
+                            <div className="modal-head">
+                                <div><h2 id="history-title">Giriş geçmişi</h2><p>{selectedUser.username} · Son giriş: {formatDate(selectedUser.lastLoginAt)}</p></div>
+                                <button className="button button-quiet button-icon" type="button" aria-label="Kapat" onClick={() => setModalMode(null)}>×</button>
+                            </div>
+                            <div className="modal-body">
+                                {error && <p className="error-banner" role="alert">{error}</p>}
+                                {historyLoading ? <div className="loading-state">Giriş kayıtları yükleniyor…</div> : history.length ? (
+                                    <div className="history-list">
+                                        {history.map((entry) => (
+                                            <div className="history-row" key={entry.id}>
+                                                <span className="history-dot" />
+                                                <span><span className="history-time">{formatDate(entry.loggedInAt)}</span><span className="history-caption">Başarılı oturum açma</span></span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : <div className="empty-state"><div className="empty-icon">◷</div><h3>Giriş kaydı bulunamadı</h3><p>Bu kullanıcı için görüntülenecek bir giriş kaydı yok.</p></div>}
+                            </div>
+                            <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setModalMode(null)}>Kapat</button></div>
+                        </section>
+                    )}
+                </div>
+            )}
+        </>
     );
 }
-
-const btn = { padding: "6px 12px", border: "none", borderRadius: 4, cursor: "pointer", marginLeft: 6, color: "#fff" };
-const badge = { padding: "2px 10px", borderRadius: 12, fontSize: 13, color: "#fff" };
-
-const styles = {
-    page: { maxWidth: 1100, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" },
-    card: { marginTop: 16, padding: 20, border: "1px solid #ddd", borderRadius: 8 },
-    error: { color: "#dc3545" },
-    createForm: { display: "flex", gap: 8, marginBottom: 16 },
-    table: { width: "100%", borderCollapse: "collapse" },
-    th: { textAlign: "left", padding: 8, borderBottom: "2px solid #ddd" },
-    td: { padding: 8, borderBottom: "1px solid #eee" },
-    historyCell: { padding: 12, background: "#f8f9fa", borderBottom: "1px solid #eee", fontSize: 13 },
-    input: { width: "100%", padding: 6, fontSize: 14, border: "1px solid #0d6efd", borderRadius: 4, boxSizing: "border-box" },
-    on: { ...badge, background: "#198754" },
-    off: { ...badge, background: "#6c757d" },
-    save: { ...btn, background: "#198754" },
-    gray: { ...btn, background: "#6c757d" },
-    danger: { ...btn, background: "#dc3545" },
-};

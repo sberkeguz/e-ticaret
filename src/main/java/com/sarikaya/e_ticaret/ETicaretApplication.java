@@ -9,5 +9,4 @@ public class ETicaretApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(ETicaretApplication.class, args);
-	}
-	}
+	}}

@@ -1,133 +1,129 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import { addToCart, cartCount } from "../cart";
+import AddToCart from "../components/AddToCart";
+import CategoryPicker from "../components/CategoryPicker";
 
-const money = (v) => Number(v).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
+const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
+const getParentIds = (category) => Array.isArray(category.parentIds)
+    ? category.parentIds
+    : category.parentId == null ? [] : [category.parentId];
 
 export default function UserHome() {
     const navigate = useNavigate();
-    const username = localStorage.getItem("username");
-
-    // Sunucudan gelen veriler
-    const [brands, setBrands] = useState([]);
-    const [categories, setCategories] = useState([]); // düz liste: {id, name, parentId}
-    const [latest, setLatest] = useState([]);
-    const [results, setResults] = useState([]);
+    const username = localStorage.getItem("username") || "Misafir";
+    const [categories, setCategories] = useState([]);
+    const [allProducts, setAllProducts] = useState([]);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
-
-    // Filtreler
     const [searchInput, setSearchInput] = useState("");
-    const [search, setSearch] = useState("");          // gecikmeli (debounce) hali
-    const [brandIds, setBrandIds] = useState([]);
-    const [categoryPath, setCategoryPath] = useState([]); // seçili kategori zinciri: [Elektronik, Telefon]
+    const [search, setSearch] = useState("");
+    const [categoryPath, setCategoryPath] = useState(() => (window.history.state?.usr?.categoryPath ?? []).map(Number));
     const [minPrice, setMinPrice] = useState("");
     const [maxPrice, setMaxPrice] = useState("");
     const [inStock, setInStock] = useState(false);
+    const [brandIds, setBrandIds] = useState([]);
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const [count, setCount] = useState(cartCount);
 
-    const hasFilter =
-        search.trim() || brandIds.length || categoryPath.length || minPrice || maxPrice || inStock;
-
-    // İlk yükleme: markalar, kategoriler, son eklenenler
     useEffect(() => {
+        const refresh = () => setCount(cartCount());
+        window.addEventListener("cart-changed", refresh);
+        return () => window.removeEventListener("cart-changed", refresh);
+    }, []);
+
+    const hasFilter = Boolean(search.trim() || categoryPath.length || minPrice || maxPrice || inStock || brandIds.length);
+
+    useEffect(() => {
+        let active = true;
         const loadAll = async () => {
             try {
-                const [b, c, l] = await Promise.all([
-                    apiFetch("/api/user/brands"),
+                const [categoryResponse, productResponse] = await Promise.all([
                     apiFetch("/api/user/categories"),
-                    apiFetch("/api/user/products/latest"),
+                    apiFetch("/api/products"),
                 ]);
-                if (b.ok) setBrands(await b.json());
-                if (c.ok) setCategories(await c.json());
-                if (l.ok) setLatest(await l.json());
-            } catch {
-                setError("Sunucuya ulaşılamadı.");
+                if (!productResponse.ok) throw new Error("Ürünler yüklenemedi.");
+                const productData = await productResponse.json();
+                const categoryData = categoryResponse.ok ? await categoryResponse.json() : [];
+                if (!active) return;
+                setCategories(categoryData);
+                setAllProducts(productData);
+            } catch (loadError) {
+                if (active) setError(loadError.message || "Sunucuya ulaşılamadı.");
             } finally {
-                setLoading(false);
+                if (active) setLoading(false);
             }
         };
         loadAll();
+        return () => { active = false; };
     }, []);
 
-    // Arama kutusu: yazmayı bıraktıktan 400 ms sonra aramayı başlat (her tuşta istek atmamak için)
     useEffect(() => {
-        const t = setTimeout(() => setSearch(searchInput), 400);
-        return () => clearTimeout(t);
+        const timeout = setTimeout(() => setSearch(searchInput), 350);
+        return () => clearTimeout(timeout);
     }, [searchInput]);
 
-    // Bir kategorinin kendisi + tüm alt kategorilerinin id'leri
-    const collectIds = (rootId) => {
+    const collectIds = useCallback((rootId) => {
         const ids = [];
-        const seen = new Set(); // döngü olursa sonsuza gitmesin
+        const seen = new Set();
         const walk = (id) => {
             if (seen.has(id)) return;
             seen.add(id);
             ids.push(id);
-            categories.filter((c) => c.parentId === id).forEach((c) => walk(c.id));
+            categories.filter((category) => getParentIds(category).includes(id)).forEach((child) => walk(child.id));
         };
         walk(rootId);
         return ids;
-    };
+    }, [categories]);
 
-    // Filtre/arama değişince sonuçları getir
-    useEffect(() => {
-        if (!hasFilter) {
-            setResults([]);
-            return;
-        }
-        const params = new URLSearchParams();
-        if (search.trim()) params.set("search", search.trim());
-        if (brandIds.length) params.set("brandIds", brandIds.join(","));
-        if (categoryPath.length) {
-            const last = categoryPath[categoryPath.length - 1];
-            params.set("categoryIds", collectIds(last).join(","));
-        }
-        if (minPrice) params.set("minPrice", minPrice);
-        if (maxPrice) params.set("maxPrice", maxPrice);
-        if (inStock) params.set("inStock", "true");
+    const products = useMemo(() => {
+        const query = search.trim().toLowerCase();
+        const deepest = categoryPath.filter((id) => !categoryPath.some((other) => other !== id && collectIds(id).includes(other)));
+        const allowed = new Set(deepest.flatMap(collectIds));
+        return allProducts.filter((product) => {
+            if (query && !product.name?.toLowerCase().includes(query)) return false;
+            if (allowed.size && !(product.categoryIds ?? []).some((id) => allowed.has(id))) return false;
+            if (minPrice && Number(product.price) < Number(minPrice)) return false;
+            if (maxPrice && Number(product.price) > Number(maxPrice)) return false;
+            if (inStock && Number(product.stock ?? 0) <= 0) return false;
+            if (brandIds.length && !brandIds.includes(product.brandId)) return false;
+            return true;
+        });
+    }, [allProducts, search, categoryPath, minPrice, maxPrice, inStock, brandIds, collectIds]);
 
-        const load = async () => {
-            try {
-                const res = await apiFetch(`/api/user/products?${params.toString()}`);
-                if (res.ok) setResults(await res.json());
-                else setError("Ürünler yüklenemedi.");
-            } catch {
-                setError("Sunucuya ulaşılamadı.");
-            }
-        };
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [search, brandIds, categoryPath, minPrice, maxPrice, inStock, categories]);
+    const brands = useMemo(() => {
+        const map = new Map();
+        allProducts.forEach((product) => { if (product.brandId != null) map.set(product.brandId, product.brandName); });
+        return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+    }, [allProducts]);
 
-    // Kategori çubuğunun satırları: kökler, seçilen kategorinin çocukları, onun çocukları...
-    const childrenOf = (parentId) => categories.filter((c) => (c.parentId ?? null) === parentId);
-    const rows = [];
-    let parent = null;
-    for (let level = 0; level <= categoryPath.length; level++) {
-        const items = childrenOf(parent);
-        if (items.length === 0) break;
-        rows.push(items);
-        parent = categoryPath[level] ?? null;
-        if (parent === null) break;
-    }
+    const brandMatches = useMemo(() => {
+        const query = searchInput.trim().toLowerCase();
+        if (!query) return [];
+        return brands.filter((brand) => brand.name.toLowerCase().includes(query) && !brandIds.includes(brand.id)).slice(0, 5);
+    }, [brands, searchInput, brandIds]);
 
-    const pickCategory = (level, id) => {
-        // Aynısına tekrar basınca seçim ve altındakiler kalkar
-        if (categoryPath[level] === id) setCategoryPath(categoryPath.slice(0, level));
-        else setCategoryPath([...categoryPath.slice(0, level), id]);
-    };
-
-    const toggleBrand = (id) =>
-        setBrandIds(brandIds.includes(id) ? brandIds.filter((x) => x !== id) : [...brandIds, id]);
-
-    const clearAll = () => {
+    const selectBrand = (id) => {
+        setBrandIds([id]);
         setSearchInput("");
         setSearch("");
-        setBrandIds([]);
+    };
+
+    const selectedCategories = useMemo(
+        () => categories.filter((category) => categoryPath.includes(category.id)),
+        [categories, categoryPath],
+    );
+
+    const clearFilters = () => {
+        setSearchInput("");
+        setSearch("");
         setCategoryPath([]);
         setMinPrice("");
         setMaxPrice("");
         setInStock(false);
+        setBrandIds([]);
+        setError("");
     };
 
     const logout = () => {
@@ -135,143 +131,139 @@ export default function UserHome() {
         navigate("/login");
     };
 
-    const ProductCard = ({ p }) => (
-        <div style={styles.product}>
-            <div style={{ fontWeight: 600, fontSize: 17 }}>{p.name}</div>
-            <div style={{ color: "#666", fontSize: 14 }}>{p.brandName} · {p.categoryName}</div>
-            <div style={{ marginTop: 8, fontWeight: 600 }}>{money(p.price)}</div>
-            <div style={{ color: p.stock > 0 ? "#198754" : "#dc3545", fontSize: 14 }}>
-                {p.stock > 0 ? `Stokta: ${p.stock}` : "Tükendi"}
-            </div>
-        </div>
-    );
-
     return (
-        <div style={styles.page}>
-            {/* Üst bar: solda başlık, sağda arama + çıkış */}
-            <header style={styles.header}>
-                <h1 style={{ margin: 0, fontSize: 22 }}>Hoş geldin, {username}</h1>
-                <div style={styles.headerRight}>
-                    <input
-                        style={styles.search}
-                        placeholder="Ürün ara..."
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                    />
-                    <button style={styles.logout} onClick={logout}>Çıkış Yap</button>
-                </div>
-            </header>
-
-            {/* Kategori çubuğu */}
-            {rows.length > 0 && (
-                <nav style={styles.catBar}>
-                    {rows.map((items, level) => (
-                        <div key={level} style={styles.catRow}>
-                            {items.map((c) => (
-                                <button
-                                    key={c.id}
-                                    onClick={() => pickCategory(level, c.id)}
-                                    style={categoryPath[level] === c.id ? styles.catActive : styles.cat}
-                                >
-                                    {c.name}
+        <div className="storefront">
+            <header className="store-header">
+                <a className="store-logo" href="/home"><span className="brand-mark">E</span> E-Ticaret</a>
+                <div className="store-search search-field" style={{ position: "relative" }}>
+                    <span className="search-glyph">⌕</span>
+                    <input className="input" placeholder="Aradığınız ürünü yazın..." value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
+                    {brandMatches.length > 0 && (
+                        <div className="surface" style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, padding: 6, zIndex: 20 }}>
+                            <span className="section-caption" style={{ padding: "4px 10px", display: "block" }}>Markalar</span>
+                            {brandMatches.map((brand) => (
+                                <button type="button" className="button button-quiet" style={{ width: "100%", justifyContent: "flex-start" }} key={brand.id} onClick={() => selectBrand(brand.id)}>
+                                    {brand.name}
                                 </button>
                             ))}
                         </div>
-                    ))}
-                </nav>
-            )}
+                    )}
+                </div>
+                <div className="store-user">
+                    <span className="avatar small">{username.slice(0, 2)}</span>
+                    <span className="store-user-name">Merhaba, {username}</span>
+                    <button className="button button-quiet button-small" onClick={() => navigate("/cart")}>Sepet ({count})</button>
+                    {localStorage.getItem("role") === "ADMIN" && (
+                        <button className="button button-primary button-small" onClick={() => navigate("/admin")}>Admin görünümü</button>
+                    )}
+                    <button className="button button-quiet button-small" onClick={logout}>Çıkış</button>
+                </div>
+            </header>
 
-            {error && <p style={styles.error}>{error}</p>}
+            <main className="store-content">
+                <section className="store-hero">
+                    <div>
+                        <div className="eyebrow" style={{ color: "#e1e4ff" }}>SİZİN İÇİN SEÇİLDİ</div>
+                        <h1>Güzel şeyler keşfetmeye başlayın.</h1>
+                        <p>Mağazamızdaki ürünleri keşfedin, size uygun olanı bulun.</p>
+                    </div>
+                </section>
 
-            <div style={styles.body}>
-                {/* Sol: filtreler */}
-                <aside style={styles.sidebar}>
-                    <h3 style={{ marginTop: 0 }}>Filtreler</h3>
-
-                    <div style={styles.group}>
-                        <strong>Marka</strong>
-                        {brands.length === 0 && <div style={styles.muted}>Marka yok</div>}
-                        {brands.map((b) => (
-                            <label key={b.id} style={styles.check}>
-                                <input
-                                    type="checkbox"
-                                    checked={brandIds.includes(b.id)}
-                                    onChange={() => toggleBrand(b.id)}
-                                />{" "}
-                                {b.name}
-                            </label>
+                {brandIds.length > 0 && (
+                    <nav className="store-cat-list" aria-label="Marka filtresi">
+                        {brands.filter((brand) => brandIds.includes(brand.id)).map((brand) => (
+                            <button className="store-cat active" key={brand.id} onClick={() => setBrandIds((current) => current.filter((id) => id !== brand.id))}>
+                                Marka: {brand.name} ✕
+                            </button>
                         ))}
-                    </div>
+                    </nav>
+                )}
+                {categories.length > 0 && (
+                    <nav className="store-cat-list" aria-label="Kategori filtresi">
+                        <button className="store-cat active" onClick={() => setPickerOpen(true)}>▦ Kategoriler</button>
+                        {selectedCategories.map((category) => (
+                            <button className="store-cat" key={category.id} onClick={() => setCategoryPath((current) => current.filter((id) => id !== category.id))}>
+                                {category.name} ✕
+                            </button>
+                        ))}
+                    </nav>
+                )}
+                {pickerOpen && (
+                    <CategoryPicker
+                        categories={categories}
+                        selectedIds={categoryPath}
+                        onChange={(ids) => setCategoryPath(ids.map(Number))}
+                        onClose={() => setPickerOpen(false)}
+                    />
+                )}
 
-                    <div style={styles.group}>
-                        <strong>Fiyat</strong>
-                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                            <input style={styles.priceInput} type="number" min="0" placeholder="En az"
-                                   value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
-                            <input style={styles.priceInput} type="number" min="0" placeholder="En çok"
-                                   value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+                {error && <p className="error-banner" role="alert">{error}</p>}
+
+                <div className="store-body">
+                    <aside className="surface store-sidebar">
+                        <div className="toolbar" style={{ marginBottom: 0 }}>
+                            <h2 className="section-title">Filtreler</h2>
+                            {hasFilter && <button className="button button-quiet button-small" onClick={clearFilters}>Temizle</button>}
                         </div>
-                    </div>
-
-                    <div style={styles.group}>
-                        <label style={styles.check}>
-                            <input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} />{" "}
-                            Sadece stokta olanlar
-                        </label>
-                    </div>
-
-                    {hasFilter && <button style={styles.clear} onClick={clearAll}>Filtreleri temizle</button>}
-                </aside>
-
-                {/* Orta: son eklenenler ya da sonuçlar */}
-                <main style={styles.main}>
-                    {loading ? (
-                        <p>Yükleniyor...</p>
-                    ) : hasFilter ? (
-                        <section>
-                            <h2 style={styles.h2}>Sonuçlar ({results.length})</h2>
-                            {results.length === 0 ? (
-                                <p style={styles.muted}>Aramanıza uygun ürün bulunamadı.</p>
-                            ) : (
-                                <div style={styles.grid}>
-                                    {results.map((p) => <ProductCard key={p.id} p={p} />)}
-                                </div>
-                            )}
-                        </section>
-                    ) : latest.length > 0 ? (
-                        <section>
-                            <h2 style={styles.h2}>Son eklenenler</h2>
-                            <div style={styles.grid}>
-                                {latest.map((p) => <ProductCard key={p.id} p={p} />)}
+                        <div className="filter-group">
+                            <span className="filter-title">Fiyat aralığı</span>
+                            <div className="price-pair">
+                                <input className="input" type="number" min="0" placeholder="En az" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} />
+                                <input className="input" type="number" min="0" placeholder="En çok" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} />
                             </div>
-                        </section>
-                    ) : null}
-                </main>
-            </div>
+                        </div>
+                        <div className="filter-group">
+                            <label className="store-check"><input type="checkbox" checked={inStock} onChange={(event) => setInStock(event.target.checked)} /> Yalnızca stokta olanlar</label>
+                        </div>
+                    </aside>
+
+                    <section>
+                        <div className="store-main-head">
+                            <div>
+                                <h2>{hasFilter ? "Arama sonuçları" : "Yeni keşifler"}</h2>
+                                <p>{loading ? "Katalog yükleniyor…" : `${products.length} ürün listeleniyor`}</p>
+                            </div>
+                        </div>
+                        {loading ? <div className="loading-state">Mağaza kataloğu hazırlanıyor…</div> : products.length ? (
+                            <div className="store-grid">
+                                {products.map((product) => {
+                                    const quantity = Number(product.stock ?? 0);
+                                    return (
+                                        <article className="surface store-product" key={product.id} onClick={() => navigate(`/product/${product.id}`)} style={{ cursor: "pointer" }}>
+                                            <div className="store-product-image">
+                                                {product.imageUrl ? <img src={product.imageUrl} alt={product.name} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : "▦"}
+                                            </div>
+                                            <div className="store-product-content">
+                                                <h3 className="store-product-name">{product.name}</h3>
+                                                <div className="store-product-bottom">
+                                                    <span className="store-price">{money(product.price)}</span>
+                                                    <span className={`store-stock${quantity <= 0 ? " out" : ""}`}>{quantity > 0 ? `Stokta ${quantity}` : "Tükendi"}</span>
+                                                </div>
+                                            </div>
+                                            <div className="store-product-actions">
+                                                <div className="store-product-bottom">
+                                                    <span className="store-price">{money(product.price)}</span>
+                                                    <span className={`store-stock${quantity <= 0 ? " out" : ""}`}>{quantity > 0 ? `Stokta ${quantity}` : "Tükendi"}</span>
+                                                </div>
+                                                <AddToCart product={product} className="button button-quiet button-small" />
+                                                <button className="button button-primary button-small" disabled={quantity <= 0}
+                                                    onClick={(event) => { event.stopPropagation(); addToCart(product); navigate("/checkout"); }}>Hemen al</button>
+                                            </div>
+                                        </article>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="surface empty-state">
+                                <div className="empty-icon">⌕</div>
+                                <h3>{hasFilter ? "Sonuç bulunamadı" : "Ürünler yakında burada"}</h3>
+                                <p>{hasFilter ? "Filtrelerinizi değiştirerek tekrar deneyin." : "Mağazaya yeni ürün eklendiğinde burada görebilirsiniz."}</p>
+                                {hasFilter && <button className="button button-quiet" onClick={clearFilters}>Filtreleri temizle</button>}
+                            </div>
+                        )}
+                    </section>
+                </div>
+            </main>
         </div>
     );
 }
-
-const styles = {
-    page: { maxWidth: 1200, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" },
-    header: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" },
-    headerRight: { display: "flex", gap: 8, alignItems: "center" },
-    search: { padding: "8px 12px", fontSize: 15, border: "1px solid #bbb", borderRadius: 20, width: 260 },
-    logout: { padding: "6px 12px", cursor: "pointer" },
-    catBar: { marginTop: 16, borderBottom: "1px solid #ddd", paddingBottom: 8 },
-    catRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 },
-    cat: { padding: "6px 14px", border: "1px solid #ddd", borderRadius: 16, background: "#fff", cursor: "pointer" },
-    catActive: { padding: "6px 14px", border: "1px solid #0d6efd", borderRadius: 16, background: "#0d6efd", color: "#fff", cursor: "pointer" },
-    body: { display: "flex", gap: 24, marginTop: 16, alignItems: "flex-start" },
-    sidebar: { width: 220, flexShrink: 0, padding: 16, border: "1px solid #ddd", borderRadius: 8 },
-    group: { marginBottom: 16, display: "flex", flexDirection: "column", gap: 4 },
-    check: { display: "block", cursor: "pointer", fontSize: 14 },
-    priceInput: { width: "50%", padding: 6, border: "1px solid #bbb", borderRadius: 4, boxSizing: "border-box" },
-    clear: { width: "100%", padding: 8, cursor: "pointer" },
-    main: { flex: 1, minWidth: 0 },
-    h2: { marginTop: 0 },
-    grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 },
-    product: { padding: 16, border: "1px solid #ddd", borderRadius: 8 },
-    muted: { color: "#888", fontSize: 14 },
-    error: { color: "#dc3545" },
-};

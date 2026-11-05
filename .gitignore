@@ -31,3 +31,11 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Node ###
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+admin-panel/dist/

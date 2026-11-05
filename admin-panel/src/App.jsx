@@ -6,8 +6,14 @@ import ProtectedRoute from "./ProtectedRoute";
 import AdminPanel from "./pages/AdminPanel";
 import AdminBrand from "./pages/AdminBrand";
 import AdminUsers from "./pages/AdminUsers";
+import AdminOrders from "./pages/AdminOrders";
 import AdminCategory from "./pages/AdminCategory";
 import AdminProducts from "./pages/AdminProducts";
+import AdminProductForm from "./pages/AdminProductForm";
+import AdminLayout from "./components/AdminLayout";
+import ProductDetail from "./pages/ProductDetail";
+import Cart from "./pages/Cart";
+import Checkout from "./pages/Checkout";
 
 export default function App() {
     return (
@@ -19,7 +25,7 @@ export default function App() {
                 path="/admin"
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
-                        <AdminPanel />
+                        <AdminLayout><AdminPanel /></AdminLayout>
                     </ProtectedRoute>
                 }
             />
@@ -28,7 +34,7 @@ export default function App() {
                 path="/admin/brand"
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
-                        <AdminBrand />
+                        <AdminLayout><AdminBrand /></AdminLayout>
                     </ProtectedRoute>
                 }
             />
@@ -38,7 +44,16 @@ export default function App() {
                 path="/admin/category"
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
-                        <AdminCategory />
+                        <AdminLayout><AdminCategory /></AdminLayout>
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/admin/orders"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminLayout><AdminOrders /></AdminLayout>
                     </ProtectedRoute>
                 }
             />
@@ -47,7 +62,7 @@ export default function App() {
                 path="/admin/users"
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
-                        <AdminUsers />
+                        <AdminLayout><AdminUsers /></AdminLayout>
                     </ProtectedRoute>
                 }
             />
@@ -56,7 +71,25 @@ export default function App() {
                 path="/admin/products"
                 element={
                     <ProtectedRoute allowedRole="ADMIN">
-                        <AdminProducts />
+                        <AdminLayout><AdminProducts /></AdminLayout>
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/admin/products/new"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminLayout><AdminProductForm /></AdminLayout>
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/admin/products/:id/edit"
+                element={
+                    <ProtectedRoute allowedRole="ADMIN">
+                        <AdminLayout><AdminProductForm /></AdminLayout>
                     </ProtectedRoute>
                 }
             />
@@ -66,6 +99,33 @@ export default function App() {
                 element={
                     <ProtectedRoute>
                         <UserHome />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/product/:id"
+                element={
+                    <ProtectedRoute>
+                        <ProductDetail />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/cart"
+                element={
+                    <ProtectedRoute>
+                        <Cart />
+                    </ProtectedRoute>
+                }
+            />
+
+            <Route
+                path="/checkout"
+                element={
+                    <ProtectedRoute>
+                        <Checkout />
                     </ProtectedRoute>
                 }
             />

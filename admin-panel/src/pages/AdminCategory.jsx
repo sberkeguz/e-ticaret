@@ -1,259 +1,245 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api";
-const [parentId, setParentId] = useState("");
 
+const readError = async (response, fallback) => {
+    const body = await response.json().catch(() => null);
+    return body?.message || fallback;
+};
 
 export default function AdminCategory() {
     const [categories, setCategories] = useState([]);
     const [name, setName] = useState("");
-    // Alt kategori mantığı için eklendi
-    const [parentId, setParentId] = useState(""); 
-    
+    const [parentIds, setParentIds] = useState([]);
+    const [search, setSearch] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
-
-    // Düzenleme durumu
-    const [editingId, setEditingId] = useState(null);
+    const [saving, setSaving] = useState(false);
+    const [editing, setEditing] = useState(null);
     const [editName, setEditName] = useState("");
-    const [editParentId, setEditParentId] = useState(""); // Düzenlerken üst kategoriyi değiştirmek için
-
-    // Sunucunun gönderdiği "message" alanını okur
-    const readError = async (res, fallback) => {
-        const err = await res.json().catch(() => null);
-        return err?.message || fallback;
-    };
+    const [editParentIds, setEditParentIds] = useState([]);
 
     useEffect(() => {
-        const load = async () => {
-            try {
-                const res = await apiFetch("/api/admin/categories");
-                if (!res.ok) throw new Error();
-                setCategories(await res.json());
-            } catch {
-                setError("Kategoriler yüklenemedi.");
-            } finally {
-                setLoading(false);
-            }
-        };
-        load();
+        let active = true;
+        apiFetch("/api/admin/categories")
+            .then(async (response) => {
+                if (!response.ok) throw new Error(await readError(response, "Kategoriler yüklenemedi."));
+                const data = await response.json();
+                if (active) setCategories(data);
+            })
+            .catch((loadError) => { if (active) setError(loadError.message || "Kategoriler yüklenemedi."); })
+            .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
     }, []);
 
-    // Ekle: POST
-    const handleAdd = async (e) => {
-        e.preventDefault();
-        setError("");
-        if (!name.trim()) return;
+    const filtered = useMemo(() => categories.filter((category) =>
+        category.name.toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr"))
+    ), [categories, search]);
 
+    const categoryName = (id) => categories.find((category) => category.id === id)?.name;
+    const isDescendant = (ancestorId, targetId, visited = new Set()) => {
+        if (visited.has(ancestorId)) return false;
+        visited.add(ancestorId);
+        const children = categories.filter((category) => (category.parentIds ?? []).includes(ancestorId));
+        return children.some((child) =>
+            child.id === targetId || isDescendant(child.id, targetId, visited)
+        );
+    };
+
+    const addCategory = async (event) => {
+        event.preventDefault();
+        if (!name.trim()) return;
+        setSaving(true);
+        setError("");
         try {
-            const res = await apiFetch("/api/admin/categories", {
+            const response = await apiFetch("/api/admin/categories", {
                 method: "POST",
-                // parentId boş string ise null gönderiyoruz
-                body: JSON.stringify({ 
-                    name: name.trim(),
-                    parentId: parentId ? Number(parentId) : null
-                }),
+                body: JSON.stringify({ name: name.trim(), parentIds: parentIds.map(Number) }),
             });
-            if (!res.ok) {
-                setError(await readError(res, "Kategori eklenemedi. Bu isim zaten kayıtlı olabilir."));
-                return;
-            }
-            const saved = await res.json();
-            setCategories([...categories, saved]);
+            if (!response.ok) throw new Error(await readError(response, "Kategori eklenemedi."));
+            const created = await response.json();
+            setCategories((current) => [...current, created]);
             setName("");
-            setParentId(""); // Başarıyla eklenince select kutusunu da sıfırla
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
+            setParentIds([]);
+        } catch (requestError) {
+            setError(requestError.message || "Sunucuya ulaşılamadı.");
+        } finally {
+            setSaving(false);
         }
     };
 
-    const startEdit = (c) => {
-        setError("");
-        setEditingId(c.id);
-        setEditName(c.name);
-        setEditParentId(c.parentId || ""); // Düzenleme modunda mevcut parentId'yi al
-    };
-
-    const cancelEdit = () => {
-        setEditingId(null);
-        setEditName("");
-        setEditParentId("");
-    };
-
-    // Güncelle: PUT
-    const handleUpdate = async (id) => {
-        setError("");
+    const saveCategory = async (event) => {
+        event.preventDefault();
         if (!editName.trim()) {
             setError("Kategori adı boş olamaz.");
             return;
         }
+        setSaving(true);
+        setError("");
         try {
-            const res = await apiFetch(`/api/admin/categories/${id}`, {
+            const response = await apiFetch(`/api/admin/categories/${editing.id}`, {
                 method: "PUT",
-                body: JSON.stringify({ 
-                    name: editName.trim(),
-                    parentId: editParentId ? Number(editParentId) : null 
-                }),
+                body: JSON.stringify({ name: editName.trim(), parentIds: editParentIds.map(Number) }),
             });
-            if (!res.ok) {
-                setError(await readError(res, "Kategori güncellenemedi."));
-                return;
-            }
-            const updated = await res.json();
-            setCategories(categories.map((c) => (c.id === id ? updated : c)));
-            cancelEdit();
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
+            if (!response.ok) throw new Error(await readError(response, "Kategori güncellenemedi."));
+            const updated = await response.json();
+            setCategories((current) => current.map((category) => category.id === updated.id ? updated : category));
+            setEditing(null);
+        } catch (requestError) {
+            setError(requestError.message || "Kategori güncellenemedi.");
+        } finally {
+            setSaving(false);
         }
     };
 
-    // Sil: DELETE
-    const handleDelete = async (id, categoryName) => {
-        if (!window.confirm(`"${categoryName}" kategorisi silinsin mi?`)) return;
+    const deleteCategory = async (category) => {
+        if (!window.confirm(`"${category.name}" kategorisi silinsin mi?`)) return;
         setError("");
         try {
-            const res = await apiFetch(`/api/admin/categories/${id}`, { method: "DELETE" });
-            if (!res.ok) {
-                setError(await readError(res, "Kategori silinemedi. Bu kategoriye bağlı alt kategoriler veya ürünler olabilir."));
-                return;
-            }
-            setCategories(categories.filter((c) => c.id !== id));
-            if (editingId === id) cancelEdit();
-        } catch {
-            setError("Sunucuya ulaşılamadı.");
+            const response = await apiFetch(`/api/admin/categories/${category.id}`, { method: "DELETE" });
+            if (!response.ok) throw new Error(await readError(response, "Kategori silinemedi."));
+            setCategories((current) => current.filter((item) => item.id !== category.id));
+        } catch (requestError) {
+            setError(requestError.message || "Kategori silinemedi.");
         }
     };
 
     return (
-        <div style={styles.page}>
-            <Link to="/admin">← Admin Paneli</Link>
+        <>
+            <div className="page-heading">
+                <div>
+                    <div className="eyebrow">KATALOG MİMARİSİ</div>
+                    <h1 className="page-title">Kategoriler</h1>
+                    <p className="page-subtitle">Ürün kataloğunuzu anlaşılır koleksiyonlara ayırın ve düzenli tutun.</p>
+                </div>
+                <span className="badge badge-gray">{categories.length} kategori</span>
+            </div>
 
-            <section style={styles.card}>
-                <h2 style={{ marginTop: 0 }}>Kategoriler</h2>
+            {error && <p className="error-banner" role="alert">{error}</p>}
 
-                <form onSubmit={handleAdd} style={styles.form}>
-                    <input
-                        style={styles.input}
-                        placeholder="Kategori adı"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                    />
-                    
-                    {/* YENİ EKLENEN SELECT KUTUSU BURADA */}
-                    <select 
-                        style={styles.input} 
-                        value={parentId} 
-                        onChange={(e) => setParentId(e.target.value)}
-                    >
-                        <option value="">Üst kategori yok</option>
-                        {categories.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                    </select>
-
-                    <button style={styles.add} type="submit">Ekle</button>
-                </form>
-
-                {error && <p style={styles.error}>{error}</p>}
-
-                {loading ? (
-                    <p>Yükleniyor...</p>
-                ) : categories.length === 0 ? (
-                    <p>Henüz kategori yok.</p>
-                ) : (
-                    <table style={styles.table}>
-                        <thead>
-                        <tr>
-                            <th style={styles.th}>ID</th>
-                            <th style={styles.th}>Kategori</th>
-                            <th style={styles.th}>Üst Kategori</th>
-                            <th style={styles.th}>İşlemler</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {categories.map((c) => {
-                            // Üst kategori adını tabloda göstermek için buluyoruz
-                            const parentCat = categories.find(p => p.id === c.parentId);
-
-                            return (
-                                <tr key={c.id}>
-                                    <td style={styles.td}>{c.id}</td>
-
-                                    <td style={styles.td}>
-                                        {editingId === c.id ? (
+            <section className="category-layout">
+                <div className="surface surface-pad category-create">
+                    <div className="stat-icon" style={{ marginBottom: 16 }}>◈</div>
+                    <h2 className="section-title">Koleksiyon oluştur</h2>
+                    <p className="section-caption">Yeni ürün grupları ekleyerek mağaza kataloğunu zenginleştirin.</p>
+                    <form onSubmit={addCategory} style={{ display: "grid", gap: 14, marginTop: 22 }}>
+                        <label className="field">
+                            <span className="field-label">Kategori adı</span>
+                            <input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Örn. Taze meyveler" maxLength={100} required />
+                        </label>
+                        <div className="field">
+                            <span className="field-label">Üst kategoriler <span style={{ color: "var(--muted)", fontWeight: 400 }}>· isteğe bağlı</span></span>
+                            {categories.length ? (
+                                <div className="product-category-picker" style={{ maxHeight: 180 }}>
+                                    {categories.map((category) => (
+                                        <label className="category-option" key={category.id}>
                                             <input
-                                                style={styles.editInput}
-                                                value={editName}
-                                                autoFocus
-                                                onChange={(e) => setEditName(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter") handleUpdate(c.id);
-                                                    if (e.key === "Escape") cancelEdit();
-                                                }}
+                                                type="checkbox"
+                                                checked={parentIds.includes(String(category.id))}
+                                                onChange={() => setParentIds((current) => current.includes(String(category.id))
+                                                    ? current.filter((value) => value !== String(category.id))
+                                                    : [...current, String(category.id)])}
                                             />
-                                        ) : (
-                                            c.name
-                                        )}
-                                    </td>
+                                            <span>{category.name}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            ) : <span className="section-caption">İlk kategori üst kategori olmadan oluşturulur.</span>}
+                            <span className="section-caption">Birden fazla üst kategori seçebilirsiniz.</span>
+                        </div>
+                        <button className="button button-primary" type="submit" disabled={saving}>
+                            {saving ? "Oluşturuluyor…" : "+ Kategori oluştur"}
+                        </button>
+                    </form>
+                    <div className="category-stat">◉ <span>Bu katalogda <strong>{categories.length}</strong> kategori bulunuyor.</span></div>
+                    <p className="section-caption" style={{ lineHeight: 1.7 }}>
+                        Kategoriler ürün ekleme ekranında seçilebilir. Her kategori, ürünleri müşteriler için daha kolay keşfedilebilir hale getirir.
+                    </p>
+                </div>
 
-                                    {/* Tabloda Üst Kategori Gösterimi / Düzenlemesi */}
-                                    <td style={styles.td}>
-                                        {editingId === c.id ? (
-                                            <select 
-                                                style={styles.editInput} 
-                                                value={editParentId} 
-                                                onChange={(e) => setEditParentId(e.target.value)}
-                                            >
-                                                <option value="">Üst kategori yok</option>
-                                                {categories
-                                                    .filter(cat => cat.id !== c.id) // Kendisini üst kategori seçemesin diye
-                                                    .map((cat) => (
-                                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                                ))}
-                                            </select>
-                                        ) : (
-                                            parentCat ? parentCat.name : <span style={{ color: '#999' }}>-</span>
-                                        )}
-                                    </td>
-
-                                    <td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
-                                        {editingId === c.id ? (
-                                            <>
-                                                <button style={styles.save} onClick={() => handleUpdate(c.id)}>Kaydet</button>
-                                                <button style={styles.gray} onClick={cancelEdit}>İptal</button>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <button style={styles.gray} onClick={() => startEdit(c)}>Düzenle</button>
-                                                <button style={styles.danger} onClick={() => handleDelete(c.id, c.name)}>Sil</button>
-                                            </>
-                                        )}
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                        </tbody>
-                    </table>
-                )}
+                <section className="surface surface-pad">
+                    <div className="toolbar">
+                        <div>
+                            <h2 className="section-title">Koleksiyonlarınız</h2>
+                            <p className="section-caption">Kategori kartlarını arayın, düzenleyin veya kaldırın.</p>
+                        </div>
+                        <div className="search-field">
+                            <span className="search-glyph">⌕</span>
+                            <input className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Kategori ara..." />
+                        </div>
+                    </div>
+                    {loading ? <div className="loading-state">Kategoriler yükleniyor…</div> : filtered.length === 0 ? (
+                        <div className="empty-state">
+                            <div className="empty-icon">◈</div>
+                            <h3>{search ? "Eşleşen kategori yok" : "İlk koleksiyonunuzu oluşturun"}</h3>
+                            <p>{search ? "Başka bir arama kelimesi deneyin." : "Ürünlerinizi gruplandırmak için soldaki formu kullanın."}</p>
+                        </div>
+                    ) : (
+                        <div className="category-grid">
+                            {filtered.map((category, index) => (
+                                <article className="surface category-card" key={category.id}>
+                                    <div className="category-card-top">
+                                        <span className="category-symbol">{["◈", "◉", "◇", "▤", "✦"][index % 5]}</span>
+                                        <div className="category-actions">
+                                            <button className="button button-quiet button-small button-icon" title="Düzenle" aria-label={`${category.name} kategorisini düzenle`} onClick={() => { setError(""); setEditing(category); setEditName(category.name); setEditParentIds((category.parentIds ?? []).map(String)); }}>✎</button>
+                                            <button className="button button-danger button-small button-icon" title="Sil" aria-label={`${category.name} kategorisini sil`} onClick={() => deleteCategory(category)}>×</button>
+                                        </div>
+                                    </div>
+                                    <h3 className="category-name">{category.name}</h3>
+                                    <div className="category-id">KATEGORİ · #{category.id}</div>
+                                    <div className="category-stat">
+                                        ⌁ <span>Üst kategoriler: {(category.parentIds ?? []).map(categoryName).filter(Boolean).join(", ") || "Ana kategori"}</span>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </section>
             </section>
-        </div>
+
+            {editing && (
+                <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditing(null); }}>
+                    <form className="modal-card" onSubmit={saveCategory}>
+                        <div className="modal-head">
+                            <div><h2>Kategoriyi düzenle</h2><p>Kategori adı tüm katalogda güncellenir.</p></div>
+                            <button className="button button-quiet button-icon" type="button" aria-label="Kapat" onClick={() => setEditing(null)}>×</button>
+                        </div>
+                        <div className="modal-body" style={{ display: "grid", gap: 16 }}>
+                            <label className="field">
+                                <span className="field-label">Kategori adı</span>
+                                <input className="input" autoFocus value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={100} />
+                            </label>
+                            <div className="field">
+                                <span className="field-label">Üst kategoriler</span>
+                                {categories.filter((category) =>
+                                    category.id !== editing.id && !isDescendant(editing.id, category.id)
+                                ).length ? (
+                                    <div className="product-category-picker">
+                                        {categories
+                                            .filter((category) => category.id !== editing.id && !isDescendant(editing.id, category.id))
+                                            .map((category) => (
+                                                <label className="category-option" key={category.id}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={editParentIds.includes(String(category.id))}
+                                                        onChange={() => setEditParentIds((current) => current.includes(String(category.id))
+                                                            ? current.filter((value) => value !== String(category.id))
+                                                            : [...current, String(category.id)])}
+                                                    />
+                                                    <span>{category.name}</span>
+                                                </label>
+                                            ))}
+                                    </div>
+                                ) : <span className="section-caption">Bu kategori ana kategori olarak kalacak.</span>}
+                                <span className="section-caption">Birden fazla üst kategori seçebilirsiniz.</span>
+                            </div>
+                        </div>
+                        <div className="modal-actions">
+                            <button className="button button-quiet" type="button" onClick={() => setEditing(null)}>Vazgeç</button>
+                            <button className="button button-primary" type="submit" disabled={saving}>{saving ? "Kaydediliyor…" : "Değişiklikleri kaydet"}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+        </>
     );
 }
-
-const btn = { padding: "6px 12px", border: "none", borderRadius: 4, cursor: "pointer", marginLeft: 6, color: "#fff" };
-
-const styles = {
-    page: { maxWidth: 800, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" },
-    card: { marginTop: 16, padding: 20, border: "1px solid #ddd", borderRadius: 8 },
-    form: { display: "flex", gap: 8, marginBottom: 16 },
-    input: { flex: 1, padding: 10, fontSize: 16, border: "1px solid #bbb", borderRadius: 4 },
-    editInput: { width: "100%", padding: 6, fontSize: 16, border: "1px solid #0d6efd", borderRadius: 4, boxSizing: "border-box" },
-    add: { padding: "10px 20px", background: "#0d6efd", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" },
-    save: { ...btn, background: "#198754" },
-    gray: { ...btn, background: "#6c757d" },
-    danger: { ...btn, background: "#dc3545" },
-    error: { color: "#dc3545" },
-    table: { width: "100%", borderCollapse: "collapse" },
-    th: { textAlign: "left", padding: 8, borderBottom: "2px solid #ddd" },
-    td: { padding: 8, borderBottom: "1px solid #eee" },
-};
