@@ -1,12 +1,6 @@
-<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/audit/repository/LoginHistoryRepository.java
 package com.sarikaya.e_ticaret.audit.repository;
 
 import com.sarikaya.e_ticaret.audit.entity.LoginHistory;
-========
-package com.sarikaya.e_ticaret.user.repository;
-
-import com.sarikaya.e_ticaret.user.entity.LoginHistory;
->>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/user/repository/LoginHistoryRepository.java
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

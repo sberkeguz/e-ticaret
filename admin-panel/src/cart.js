@@ -1,4 +1,7 @@
+import { apiFetch } from "./api";
+
 const KEY = "cart";
+let syncQueue = Promise.resolve();
 
 export const getCart = () => {
     try {
@@ -9,6 +12,74 @@ export const getCart = () => {
 };
 
 const save = (items) => {
+    localStorage.setItem(KEY, JSON.stringify(items));
+    window.dispatchEvent(new Event("cart-changed"));
+    if (localStorage.getItem("token")) {
+        syncQueue = syncQueue.then(() => persistCart()).catch((error) => {
+            window.dispatchEvent(new CustomEvent("cart-sync-error", {
+                detail: { message: error.message || "Sepet sunucuyla eşitlenemedi." },
+            }));
+        });
+    }
+};
+
+const persistCart = async () => {
+    const response = await apiFetch("/api/cart", {
+        method: "PUT",
+        body: JSON.stringify({
+            items: getCart().map((item) => ({ productId: item.id, quantity: item.quantity })),
+        }),
+    });
+    if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || "Sepet sunucuyla eşitlenemedi.");
+    }
+};
+
+const fromServer = (items) => items.map((item) => ({
+    id: item.productId,
+    name: item.name,
+    price: item.price,
+    imageUrl: item.imageUrl,
+    stock: item.stock,
+    quantity: item.quantity,
+}));
+
+export const syncCart = async () => {
+    if (!localStorage.getItem("token")) return;
+    const response = await apiFetch("/api/cart");
+    if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.message || "Sunucu sepeti yüklenemedi.");
+    }
+
+    const serverItems = fromServer(await response.json());
+    const localItems = getCart();
+    const merged = new Map(serverItems.map((item) => [item.id, item]));
+    for (const localItem of localItems) {
+        const current = merged.get(localItem.id);
+        const quantity = (current?.quantity ?? 0) + localItem.quantity;
+        merged.set(localItem.id, {
+            ...current,
+            ...localItem,
+            quantity: Math.min(quantity, Number(localItem.stock) || quantity),
+        });
+    }
+
+    const items = [...merged.values()];
+    if (localItems.length > 0) {
+        const saveResponse = await apiFetch("/api/cart", {
+            method: "PUT",
+            body: JSON.stringify({
+                items: items.map((item) => ({ productId: item.id, quantity: item.quantity })),
+            }),
+        });
+        if (!saveResponse.ok) {
+            const body = await saveResponse.json().catch(() => null);
+            throw new Error(body?.message || "Sepet sunucuyla eşitlenemedi.");
+        }
+    }
+
     localStorage.setItem(KEY, JSON.stringify(items));
     window.dispatchEvent(new Event("cart-changed"));
 };

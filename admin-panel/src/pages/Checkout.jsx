@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
 import { clearRemoved, getCart } from "../cart";
+import StoreHeader from "../components/StoreHeader";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const ADDRESS_API = "https://api.turkiyeapi.dev/v1";
@@ -16,7 +17,6 @@ const blankForm = {
 };
 
 export default function Checkout() {
-    const navigate = useNavigate();
     const [items] = useState(getCart);
     const [form, setForm] = useState(blankForm);
     const [error, setError] = useState("");
@@ -28,10 +28,59 @@ export default function Checkout() {
     const [provinceId, setProvinceId] = useState("");
     const [districtId, setDistrictId] = useState("");
     const [addressLoadFailed, setAddressLoadFailed] = useState(false);
+    const [profileAddress, setProfileAddress] = useState(null);
 
     useEffect(() => {
         loadList("provinces?fields=id,name&limit=100").then(setProvinces).catch(() => setAddressLoadFailed(true));
     }, []);
+
+    useEffect(() => {
+        let active = true;
+        apiFetch("/api/profile")
+            .then(async (response) => {
+                if (!response.ok) throw new Error("Profil bilgileri yüklenemedi.");
+                const profile = await response.json();
+                if (!active) return;
+                setForm((current) => ({
+                    ...current,
+                    firstName: profile.firstName || current.firstName,
+                    lastName: profile.lastName || current.lastName,
+                    phone: profile.phone || current.phone,
+                    city: profile.city || current.city,
+                    district: profile.district || current.district,
+                    neighborhood: profile.neighborhood || current.neighborhood,
+                    address: profile.address || current.address,
+                }));
+                setProfileAddress(profile);
+            })
+            .catch((loadError) => { if (active) setError(loadError.message || "Profil bilgileri yüklenemedi."); });
+        return () => { active = false; };
+    }, []);
+
+    useEffect(() => {
+        if (!profileAddress?.city || provinces.length === 0) return undefined;
+        let active = true;
+        const province = provinces.find((item) => item.name === profileAddress.city);
+        if (!province) return undefined;
+
+        const loadSavedAddress = async () => {
+            setProvinceId(String(province.id));
+            try {
+                const nextDistricts = await loadList(`districts?provinceId=${province.id}&fields=id,name&limit=100`);
+                if (!active) return;
+                setDistricts(nextDistricts);
+                const district = nextDistricts.find((item) => item.name === profileAddress.district);
+                if (!district) return;
+                setDistrictId(String(district.id));
+                const nextNeighborhoods = await loadList(`neighborhoods?districtId=${district.id}&fields=id,name&limit=1000`);
+                if (active) setNeighborhoods(nextNeighborhoods);
+            } catch {
+                if (active) setAddressLoadFailed(true);
+            }
+        };
+        loadSavedAddress();
+        return () => { active = false; };
+    }, [profileAddress, provinces]);
 
     const pickProvince = (id) => {
         const province = provinces.find((item) => String(item.id) === id);
@@ -118,11 +167,7 @@ export default function Checkout() {
     };
 
     const header = (
-        <header className="store-header">
-            <a className="store-logo" href="/home"><span className="brand-mark">E</span> E-Ticaret</a>
-            <div style={{ flex: 1 }} />
-            <button className="button button-quiet button-small" onClick={() => navigate("/cart")}>← Sepete dön</button>
-        </header>
+        <StoreHeader />
     );
 
     if (done) {
@@ -133,7 +178,8 @@ export default function Checkout() {
                     <div className="surface empty-state">
                         <h3>Siparişiniz alındı 🎉</h3>
                         <p className="page-subtitle">Teşekkürler {form.firstName}! Siparişiniz hazırlanıyor.</p>
-                        <Link className="button button-primary" to="/home">Alışverişe devam et</Link>
+                        <Link className="button button-primary" to="/orders">Siparişimi takip et</Link>
+                        <Link className="button button-quiet" to="/home">Alışverişe devam et</Link>
                     </div>
                 </main>
             </div>

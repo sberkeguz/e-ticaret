@@ -125,7 +125,7 @@ export default function AdminProductForm() {
                     <div className="form-section-title">Temel bilgiler</div>
                     <label className="field span-2">
                         <span className="field-label">Ürün adı *</span>
-                        <input className="input" required maxLength={255} value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="Örn. Organik elma" />
+                        <input className="input" required maxLength={150} value={form.name} onChange={(event) => updateField("name", event.target.value)} placeholder="Örn. Organik elma" />
                     </label>
                     <label className="field span-2">
                         <span className="field-label">Fotoğraf URL'si</span>

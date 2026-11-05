@@ -4,7 +4,9 @@ import com.sarikaya.e_ticaret.user.dto.CreateUserRequest;
 import com.sarikaya.e_ticaret.audit.dto.LoginHistoryDto;
 import com.sarikaya.e_ticaret.user.dto.UpdateUserRequest;
 import com.sarikaya.e_ticaret.user.dto.UserDto;
+import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.exception.ForbiddenOperationException;
+import com.sarikaya.e_ticaret.order.repository.OrderRepository;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.exception.UsernameAlreadyExistsException;
 import com.sarikaya.e_ticaret.audit.repository.LoginHistoryRepository;
@@ -30,6 +32,7 @@ public class AdminUserController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final LoginHistoryRepository loginHistoryRepository;
+    private final OrderRepository orderRepository;
 
     // listele: GET /api/admin/users
     @GetMapping
@@ -113,6 +116,9 @@ public class AdminUserController {
         User user = findUser(id);
         if (user.getId().equals(currentUser.getId())) {
             throw new ForbiddenOperationException("Kendi hesabınızı silemezsiniz.");
+        }
+        if (orderRepository.existsByUserId(user.getId())) {
+            throw new BadRequestException("Bu kullanıcının siparişleri olduğu için silinemez.");
         }
         loginHistoryRepository.deleteByUserId(user.getId());
         userRepository.delete(user);

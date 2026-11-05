@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class OrderService {
@@ -80,5 +82,34 @@ public class OrderService {
                 o.getItems().stream()
                         .map(i -> new OrderResponse.Item(i.getProductId(), i.getProductName(), i.getPrice(), i.getQuantity()))
                         .toList());
+    }
+
+    private static final Set<String> ALLOWED_STATUSES =
+            Set.of("Hazırlanıyor", "Kargoya verildi", "Teslim edildi", "İptal edildi");
+
+    @Transactional(readOnly = true)
+    public List<OrderResponse> findMine(String username) {
+        List<Order> myOrders = orders.findAllByUserUsernameOrderByCreatedAtDesc(username);
+
+        List<OrderResponse> responses = new ArrayList<>();
+        for (Order order : myOrders) {
+            responses.add(toResponse(order));
+        }
+        return responses;
+    }
+
+    @Transactional
+    public OrderResponse updateStatus(Long id, String newStatus) {
+        boolean isValid = newStatus != null && ALLOWED_STATUSES.contains(newStatus);
+        if (!isValid) {
+            throw new BadRequestException("Geçersiz sipariş durumu.");
+        }
+
+        Order order = orders.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı."));
+
+        order.setStatus(newStatus);
+
+        return toResponse(order);
     }
 }

@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/orders")
 public class UserOrderController {
@@ -22,5 +24,10 @@ public class UserOrderController {
     @ResponseStatus(HttpStatus.CREATED)
     public OrderResponse create(Authentication auth, @Valid @RequestBody OrderRequest request) {
         return orderService.create(auth.getName(), request);
+    }
+
+    @GetMapping
+    public List<OrderResponse> mine(Authentication auth) {
+        return orderService.findMine(auth.getName());
     }
 }

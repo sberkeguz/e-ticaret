@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { addToCart, getCart, getRemoved, removeFromCart, setQuantity } from "../cart";
+import StoreHeader from "../components/StoreHeader";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
@@ -22,11 +23,7 @@ export default function Cart() {
 
     return (
         <div className="storefront">
-            <header className="store-header">
-                <a className="store-logo" href="/home"><span className="brand-mark">E</span> E-Ticaret</a>
-                <div style={{ flex: 1 }} />
-                <button className="button button-quiet button-small" onClick={() => navigate("/home")}>← Mağazaya dön</button>
-            </header>
+            <StoreHeader />
             <main className="store-content">
                 <h1 className="page-title">Sepetim</h1>
                 {items.length === 0 ? (

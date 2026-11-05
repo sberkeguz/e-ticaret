@@ -23,7 +23,7 @@
         SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/eticaret
         SPRING_DATASOURCE_USERNAME: eticaret_user
         SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-eticaret_dev_password}
-        JWT_SECRET: ${JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+        JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
       ports:
         - "8080:8080"
       depends_on:

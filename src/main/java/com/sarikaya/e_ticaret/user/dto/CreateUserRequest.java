@@ -12,15 +12,15 @@ public class CreateUserRequest {
     @NotBlank(message = "Kullanıcı adı boş olamaz.")
     private String username;
 
-    // Şifre zorunlu ve en az 5 karakter
+
     @NotBlank(message = "Şifre boş olamaz.")
     @StrongPassword
     private String password;
 
-    // Gönderilmezse USER olur
+
     private Role role;
 
-    // Gönderilmezse true (aktif) olur
+
     @FlexibleBoolean
     private Boolean active;
 }

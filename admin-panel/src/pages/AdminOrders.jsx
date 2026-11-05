@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
+import { ORDER_STEPS, CANCELLED } from "../orderStatus";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const formatDate = (value) => new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
@@ -35,6 +36,17 @@ export default function AdminOrders() {
             [order.username, order.firstName, order.lastName, order.phone, ...order.items.map((item) => item.productName)]
                 .some((value) => String(value ?? "").toLocaleLowerCase("tr").includes(query)));
     }, [orders, search, userFilter]);
+
+    const changeStatus = async (id, status) => {
+        setError("");
+        try {
+            const response = await apiFetch(`/api/admin/orders/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) });
+            if (!response.ok) throw new Error("Durum güncellenemedi.");
+            setOrders((current) => current.map((order) => (order.id === id ? { ...order, status } : order)));
+        } catch (statusError) {
+            setError(statusError.message || "Durum güncellenemedi.");
+        }
+    };
 
     const revenue = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
 
@@ -93,7 +105,11 @@ export default function AdminOrders() {
                                         </td>
                                         <td><b>{money(order.total)}</b></td>
                                         <td>{formatDate(order.createdAt)}</td>
-                                        <td><span className="badge badge-gray">{order.status}</span></td>
+                                        <td onClick={(event) => event.stopPropagation()}>
+                                            <select className="input" value={order.status} onChange={(event) => changeStatus(order.id, event.target.value)}>
+                                                {[...ORDER_STEPS, CANCELLED].map((status) => <option key={status} value={status}>{status}</option>)}
+                                            </select>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { addToCart } from "../cart";
 import AddToCart from "../components/AddToCart";
+import StoreHeader from "../components/StoreHeader";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
@@ -72,11 +73,7 @@ export default function ProductDetail() {
 
     return (
         <div className="storefront">
-            <header className="store-header">
-                <a className="store-logo" href="/home"><span className="brand-mark">E</span> E-Ticaret</a>
-                <div style={{ flex: 1 }} />
-                <button className="button button-quiet button-small" onClick={() => navigate("/home")}>← Mağazaya dön</button>
-            </header>
+            <StoreHeader />
 
             <main className="store-content">
                 {loading && <div className="loading-state">Ürün yükleniyor…</div>}

@@ -1,8 +1,4 @@
-<<<<<<<< HEAD:src/main/java/com/sarikaya/e_ticaret/exception/ApiError.java
 package com.sarikaya.e_ticaret.exception;
-========
-package com.sarikaya.e_ticaret.common.exception;
->>>>>>>> origin/master:src/main/java/com/sarikaya/e_ticaret/common/exception/ApiError.java
 
 import java.time.LocalDateTime;
 

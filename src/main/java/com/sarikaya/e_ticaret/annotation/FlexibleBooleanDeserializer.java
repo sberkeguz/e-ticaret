@@ -1,4 +1,4 @@
-package com.sarikaya.e_ticaret.common.annotation;
+package com.sarikaya.e_ticaret.annotation;
 
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.DeserializationContext;

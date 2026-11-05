@@ -54,6 +54,15 @@ public class User implements UserDetails {
     private boolean isActive = true;
     private LocalDateTime lastLoginAt;
 
+    private String firstName;
+    private String lastName;
+    private String phone;
+    private String city;
+    private String district;
+    private String neighborhood;
+    @Column(length = 300)
+    private String address;
+
 
     // @Override: UserDetails arayüzünden (interface) zorunlu olarak gelen kuralları ezdiğimizi ve kendi mantığımıza göre doldurduğumuzu belirtir.
     @Override

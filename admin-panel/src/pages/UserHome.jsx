@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
-import { addToCart, cartCount } from "../cart";
+import { addToCart } from "../cart";
 import AddToCart from "../components/AddToCart";
 import CategoryPicker from "../components/CategoryPicker";
+import StoreHeader from "../components/StoreHeader";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const getParentIds = (category) => Array.isArray(category.parentIds)
@@ -12,7 +13,6 @@ const getParentIds = (category) => Array.isArray(category.parentIds)
 
 export default function UserHome() {
     const navigate = useNavigate();
-    const username = localStorage.getItem("username") || "Misafir";
     const [categories, setCategories] = useState([]);
     const [allProducts, setAllProducts] = useState([]);
     const [error, setError] = useState("");
@@ -25,14 +25,6 @@ export default function UserHome() {
     const [inStock, setInStock] = useState(false);
     const [brandIds, setBrandIds] = useState([]);
     const [pickerOpen, setPickerOpen] = useState(false);
-    const [count, setCount] = useState(cartCount);
-
-    useEffect(() => {
-        const refresh = () => setCount(cartCount());
-        window.addEventListener("cart-changed", refresh);
-        return () => window.removeEventListener("cart-changed", refresh);
-    }, []);
-
     const hasFilter = Boolean(search.trim() || categoryPath.length || minPrice || maxPrice || inStock || brandIds.length);
 
     useEffect(() => {
@@ -126,15 +118,9 @@ export default function UserHome() {
         setError("");
     };
 
-    const logout = () => {
-        localStorage.clear();
-        navigate("/login");
-    };
-
     return (
         <div className="storefront">
-            <header className="store-header">
-                <a className="store-logo" href="/home"><span className="brand-mark">E</span> E-Ticaret</a>
+            <StoreHeader search={(
                 <div className="store-search search-field" style={{ position: "relative" }}>
                     <span className="search-glyph">⌕</span>
                     <input className="input" placeholder="Aradığınız ürünü yazın..." value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
@@ -149,16 +135,7 @@ export default function UserHome() {
                         </div>
                     )}
                 </div>
-                <div className="store-user">
-                    <span className="avatar small">{username.slice(0, 2)}</span>
-                    <span className="store-user-name">Merhaba, {username}</span>
-                    <button className="button button-quiet button-small" onClick={() => navigate("/cart")}>Sepet ({count})</button>
-                    {localStorage.getItem("role") === "ADMIN" && (
-                        <button className="button button-primary button-small" onClick={() => navigate("/admin")}>Admin görünümü</button>
-                    )}
-                    <button className="button button-quiet button-small" onClick={logout}>Çıkış</button>
-                </div>
-            </header>
+            )} />
 
             <main className="store-content">
                 <section className="store-hero">
