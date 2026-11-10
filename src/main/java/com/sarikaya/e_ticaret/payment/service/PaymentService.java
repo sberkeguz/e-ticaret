@@ -64,7 +64,7 @@ public class PaymentService {
     private static final String CANCELLED = "CANCELLED";
     private static final String REFUNDED = "REFUNDED";
     private static final String ORDER_CANCELLED = "İptal edildi";
-    private static final int RESERVATION_MINUTES = 30;
+    private static final int RESERVATION_MINUTES = 2;
 
     private final OrderRepository orders;
     private final PaymentRepository payments;
