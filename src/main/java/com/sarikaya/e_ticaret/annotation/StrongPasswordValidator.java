@@ -25,6 +25,6 @@ public class StrongPasswordValidator implements ConstraintValidator<StrongPasswo
             return true;
         }
 
-        return !value.isBlank() && value.length() >= min;
+        return PasswordRules.isStrong(value, min);
     }
 }

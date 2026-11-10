@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.auth.service;
 
+import com.sarikaya.e_ticaret.annotation.PasswordRules;
 import com.sarikaya.e_ticaret.auth.dto.AuthResponse;
 import com.sarikaya.e_ticaret.auth.dto.LoginRequest;
 import com.sarikaya.e_ticaret.auth.dto.RegisterRequest;
@@ -12,6 +13,7 @@ import com.sarikaya.e_ticaret.audit.repository.LoginHistoryRepository;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,12 +29,11 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final LoginAttemptService loginAttemptService;
 
     public AuthResponse register(RegisterRequest request) {
-        // Şifre boş, boşluklardan oluşan veya 5 karakterden kısa ise kayıt yapılmaz.
-        if (request.getPassword() == null || request.getPassword().isBlank()
-                || request.getPassword().length() < 5) {
-            throw new WeakPasswordException("Şifre en az 5 karakter olmalıdır.");
+        if (!PasswordRules.isStrong(request.getPassword())) {
+            throw new WeakPasswordException(PasswordRules.MESSAGE);
         }
 
         // Aynı kullanıcı adı zaten varsa kayıt yapılmaz.
@@ -59,11 +60,19 @@ public class AuthService {
 
     // Başarılı girişin zamanını saklar; IP ve tarayıcı bilgisi toplanmaz.
     public Object[] login(LoginRequest request) {
-        // Yanlış kimlik bilgileri veya pasif hesap için Spring Security uygun hatayı üretir.
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getUsername(), request.getPassword())
-        );
+        loginAttemptService.checkNotLocked(request.getUsername());
+
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.getUsername(), request.getPassword())
+            );
+        } catch (BadCredentialsException wrongPassword) {
+            loginAttemptService.loginFailed(request.getUsername());
+            throw wrongPassword;
+        }
+
+        loginAttemptService.loginSucceeded(request.getUsername());
 
         var user = userRepository.findByUsername(request.getUsername()).orElseThrow();
 

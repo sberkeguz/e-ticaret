@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { LOW_STOCK_LIMIT } from "./AdminPanel";
 import { apiFetch } from "../api";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
@@ -14,7 +15,8 @@ export default function AdminProducts() {
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
-    const [stockFilter, setStockFilter] = useState("all");
+    const [searchParams] = useSearchParams();
+    const [stockFilter, setStockFilter] = useState(() => (["all", "in", "low", "out"].includes(searchParams.get("stock")) ? searchParams.get("stock") : "all"));
 
     useEffect(() => {
         let active = true;
@@ -34,7 +36,10 @@ export default function AdminProducts() {
         const matchesSearch = !query || [product.name, product.brandName, ...(product.categoryNames || [])]
             .filter(Boolean).some((value) => value.toLocaleLowerCase("tr").includes(query));
         const quantity = Number(product.quantity ?? product.stock ?? 0);
-        const matchesStock = stockFilter === "all" || (stockFilter === "in" ? quantity > 0 : quantity === 0);
+        let matchesStock = true;
+        if (stockFilter === "in") matchesStock = quantity > 0;
+        if (stockFilter === "low") matchesStock = quantity < LOW_STOCK_LIMIT;
+        if (stockFilter === "out") matchesStock = quantity <= 0;
         return matchesSearch && matchesStock;
     }), [products, search, stockFilter]);
 
@@ -52,6 +57,7 @@ export default function AdminProducts() {
 
     const inStockCount = products.filter((product) => Number(product.quantity ?? product.stock ?? 0) > 0).length;
     const outOfStockCount = products.length - inStockCount;
+    const lowStockCount = products.filter((product) => Number(product.quantity ?? product.stock ?? 0) < LOW_STOCK_LIMIT).length;
 
     return (
         <>
@@ -64,11 +70,12 @@ export default function AdminProducts() {
                 <Link className="button button-primary" to="/admin/products/new">+ Yeni ürün</Link>
             </div>
 
-            <section className="stat-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }} aria-label="Stok filtresi">
+            <section className="stat-grid" aria-label="Stok filtresi">
                 {[
                     { key: "all", value: products.length, label: "Toplam ürün", icon: "▦", iconStyle: undefined },
                     { key: "in", value: inStockCount, label: "Stokta bulunan", icon: "✓", iconStyle: { color: "var(--green)", background: "var(--mint)" } },
-                    { key: "out", value: outOfStockCount, label: "Stokta olmayan", icon: "!", iconStyle: { color: "var(--amber)", background: "#fff4e3" } },
+                    { key: "low", value: lowStockCount, label: `Az kalan (<${LOW_STOCK_LIMIT})`, icon: "↓", iconStyle: { color: "var(--amber)", background: "#fff4e3" } },
+                    { key: "out", value: outOfStockCount, label: "Stokta olmayan", icon: "!", iconStyle: { color: "var(--red)", background: "#fdecef" } },
                 ].map((card) => (
                     <button
                         key={card.key}
@@ -97,6 +104,7 @@ export default function AdminProducts() {
                         <select className="select" style={{ width: 150 }} value={stockFilter} onChange={(event) => setStockFilter(event.target.value)}>
                             <option value="all">Tüm stoklar</option>
                             <option value="in">Stokta olanlar</option>
+                            <option value="low">Az kalanlar (&lt;5)</option>
                             <option value="out">Stokta olmayanlar</option>
                         </select>
                     </div>

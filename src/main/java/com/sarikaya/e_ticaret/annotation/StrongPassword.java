@@ -20,7 +20,7 @@ import java.lang.annotation.*;
 // public @interface StrongPassword => validation anotasyonumuzu tanımlıyoruz.
 public @interface StrongPassword {
 
-    String message() default "Şifre en az 5 karakter olmalıdır.";
+    String message() default PasswordRules.MESSAGE;
 
     // groups => Jakarta Validation altyapısının zorunlu kıldığı bir alandır
     // Farklı doğrulama kurallarını gruplamak için kullanılır (örneğin sadece Admin kaydında çalışsın gibi).
@@ -32,5 +32,5 @@ public @interface StrongPassword {
     // ekstra verileri taşımak için kullanılır.
     Class<? extends Payload>[] payload() default{};
 
-    int min() default 5;
+    int min() default PasswordRules.MIN_LENGTH;
 }

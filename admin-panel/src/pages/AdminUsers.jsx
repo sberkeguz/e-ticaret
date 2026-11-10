@@ -183,7 +183,7 @@ export default function AdminUsers() {
                     </label>
                     <label className="field" style={{ flex: 1 }}>
                         <span className="field-label">Başlangıç şifresi</span>
-                        <input className="input" type="password" minLength={5} required value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} placeholder="En az 5 karakter" />
+                        <input className="input" type="password" minLength={8} required value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} placeholder="En az 8 karakter, harf ve rakam" />
                     </label>
                     <label className="field" style={{ width: 145 }}>
                         <span className="field-label">Rol</span>
@@ -250,7 +250,7 @@ export default function AdminUsers() {
                                 {error && <p className="error-banner" role="alert">{error}</p>}
                                 <label className="field"><span className="field-label">Kullanıcı adı</span><input className="input" autoFocus disabled={selectedUser.username === currentUsername} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} /></label>
                                 <label className="field"><span className="field-label">Rol</span><select className="select" disabled={selectedUser.username === currentUsername} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>{ROLES.map((role) => <option key={role} value={role}>{role === "ADMIN" ? "Yönetici" : "Kullanıcı"}</option>)}</select></label>
-                                <label className="field"><span className="field-label">Yeni şifre</span><input className="input" type="password" minLength={5} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Boş bırakılırsa değişmez" /></label>
+                                <label className="field"><span className="field-label">Yeni şifre</span><input className="input" type="password" minLength={8} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Boş bırakılırsa değişmez" /></label>
                             </div>
                             <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setModalMode(null)}>Vazgeç</button><button className="button button-primary" type="submit" disabled={saving}>{saving ? "Kaydediliyor…" : "Değişiklikleri kaydet"}</button></div>
                         </form>

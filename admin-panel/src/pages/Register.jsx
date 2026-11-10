@@ -57,7 +57,7 @@ export default function Register() {
                         </label>
                         <label className="field">
                             <span className="field-label">Şifre</span>
-                            <input className="input" type="password" autoComplete="new-password" minLength={5} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="En az 5 karakter" />
+                            <input className="input" type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="En az 8 karakter, harf ve rakam" />
                         </label>
                         <button className="button button-primary" type="submit" disabled={loading} style={{ width: "100%", minHeight: 47, marginTop: 5 }}>
                             {loading ? "Hesap oluşturuluyor…" : "Hesap oluştur  →"}
