@@ -17,7 +17,8 @@ public record ProductResponse(
         Long brandId,
         String brandName,
         List<Long> categoryIds,
-        List<String> categoryNames
+        List<String> categoryNames,
+        boolean testProduct
 ) {
     public static ProductResponse from(Product product) {
         return new ProductResponse(
@@ -31,7 +32,8 @@ public record ProductResponse(
                 product.getBrand() == null ? null : product.getBrand().getId(),
                 product.getBrand() == null ? null : product.getBrand().getName(),
                 product.getCategories().stream().map(Category::getId).sorted().toList(),
-                product.getCategories().stream().map(Category::getName).sorted().toList()
+                product.getCategories().stream().map(Category::getName).sorted().toList(),
+                product.isTestProduct()
         );
     }
 }

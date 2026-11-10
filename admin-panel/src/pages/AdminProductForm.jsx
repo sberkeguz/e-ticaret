@@ -4,7 +4,7 @@ import { apiFetch } from "../api";
 import CategoryPicker from "../components/CategoryPicker";
 
 const blankForm = () => ({
-    name: "", categoryIds: [], price: "", stock: "0", description: "", imageUrl: "", origin: "", brandId: "",
+    name: "", categoryIds: [], price: "", stock: "0", description: "", imageUrl: "", origin: "", brandId: "", testProduct: false,
 });
 
 const readError = async (response, fallback) => {
@@ -21,6 +21,7 @@ const applyProduct = (product) => ({
     imageUrl: product.imageUrl ?? "",
     origin: product.origin ?? "",
     brandId: product.brandId == null ? "" : String(product.brandId),
+    testProduct: Boolean(product.testProduct),
 });
 
 export default function AdminProductForm() {
@@ -82,6 +83,7 @@ export default function AdminProductForm() {
             imageUrl: form.imageUrl.trim() || null,
             origin: form.origin.trim() || null,
             brandId: form.brandId ? Number(form.brandId) : null,
+            testProduct: form.testProduct,
         };
         setSaving(true);
         try {
@@ -141,6 +143,13 @@ export default function AdminProductForm() {
                     <label className="field span-2">
                         <span className="field-label">Üretim yeri</span>
                         <input className="input" maxLength={100} value={form.origin} onChange={(event) => updateField("origin", event.target.value)} placeholder="Örn. Türkiye" />
+                    </label>
+                    <label className="field span-2 test-product-toggle">
+                        <input type="checkbox" checked={form.testProduct} onChange={(event) => updateField("testProduct", event.target.checked)} />
+                        <span>
+                            <span className="field-label">Test ürünü</span>
+                            <span className="section-caption">Açıksa ürünü sadece yöneticiler görür; müşteriler mağazada göremez ve sepete ekleyemez.</span>
+                        </span>
                     </label>
 
                     <div className="field span-2">

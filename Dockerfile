@@ -11,4 +11,5 @@ WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# iyzico ile TLS 1.2: sandbox, TLS 1.3 el sıkışmalarını zaman zaman kesiyor.
+ENTRYPOINT ["java", "-Djdk.tls.client.protocols=TLSv1.2", "-jar", "app.jar"]

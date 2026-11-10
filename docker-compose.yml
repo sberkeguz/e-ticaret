@@ -24,6 +24,11 @@
         SPRING_DATASOURCE_USERNAME: eticaret_user
         SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-eticaret_dev_password}
         JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
+        IYZIPAY_API_KEY: ${IYZIPAY_API_KEY:-}
+        IYZIPAY_SECRET_KEY: ${IYZIPAY_SECRET_KEY:-}
+        IYZIPAY_BASE_URL: ${IYZIPAY_BASE_URL:-https://sandbox-api.iyzipay.com}
+        IYZIPAY_CALLBACK_URL: ${IYZIPAY_CALLBACK_URL:-http://localhost:8080/api/payments/callback}
+        APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
       ports:
         - "8080:8080"
       depends_on:

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { cartCount, syncCart } from "../cart";
+import { clearSessionStorage } from "../favorites";
 
-export default function StoreHeader({ search }) {
+export default function StoreHeader({ search, syncCartOnMount = true }) {
     const navigate = useNavigate();
     const [username, setUsername] = useState(() => localStorage.getItem("username") || "Misafir");
     const [open, setOpen] = useState(false);
@@ -21,12 +22,12 @@ export default function StoreHeader({ search }) {
         const handleSyncError = (event) => setCartError(event.detail?.message || "Sepet sunucuyla eşitlenemedi.");
         window.addEventListener("cart-changed", updateCount);
         window.addEventListener("cart-sync-error", handleSyncError);
-        syncCart().catch((error) => setCartError(error.message || "Sepet sunucuyla eşitlenemedi."));
+        if (syncCartOnMount) syncCart().catch((error) => setCartError(error.message || "Sepet sunucuyla eşitlenemedi."));
         return () => {
             window.removeEventListener("cart-changed", updateCount);
             window.removeEventListener("cart-sync-error", handleSyncError);
         };
-    }, []);
+    }, [syncCartOnMount]);
 
     useEffect(() => {
         if (!open) return undefined;
@@ -38,7 +39,7 @@ export default function StoreHeader({ search }) {
     }, [open]);
 
     const logout = () => {
-        localStorage.clear();
+        clearSessionStorage();
         navigate("/login");
     };
 
@@ -51,6 +52,7 @@ export default function StoreHeader({ search }) {
                     <span aria-hidden="true">☰</span>
                 </button>
             </header>
+            {cartError && <p className="error-banner" role="alert">{cartError}</p>}
             {open && (
                 <div
                     role="presentation"
@@ -66,10 +68,10 @@ export default function StoreHeader({ search }) {
                         </div>
                         <Link to="/home" onClick={() => setOpen(false)} style={styles.link}>Ana sayfa</Link>
                         <Link to="/profile" onClick={() => setOpen(false)} style={styles.link}>Profilim</Link>
+                        <Link to="/favorites" onClick={() => setOpen(false)} style={styles.link}>Favorilerim</Link>
                         <Link to="/orders" onClick={() => setOpen(false)} style={styles.link}>Siparişlerim</Link>
                         <Link to="/cart" onClick={() => setOpen(false)} style={styles.link}>Sepetim ({count})</Link>
                         {isAdmin && <Link to="/admin" onClick={() => setOpen(false)} style={styles.link}>Yönetim paneli</Link>}
-                        {cartError && <p role="alert" style={styles.error}>{cartError}</p>}
                         <button type="button" onClick={logout} style={styles.logout}>Çıkış yap</button>
                     </aside>
                 </div>

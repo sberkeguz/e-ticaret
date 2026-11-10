@@ -1,7 +1,9 @@
 package com.sarikaya.e_ticaret.order.controller.user;
 
+import com.sarikaya.e_ticaret.order.dto.OrderDetailResponse;
 import com.sarikaya.e_ticaret.order.dto.OrderRequest;
 import com.sarikaya.e_ticaret.order.dto.OrderResponse;
+import com.sarikaya.e_ticaret.order.service.OrderDetailService;
 import com.sarikaya.e_ticaret.order.service.OrderService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -15,9 +17,11 @@ import java.util.List;
 public class UserOrderController {
 
     private final OrderService orderService;
+    private final OrderDetailService orderDetailService;
 
-    public UserOrderController(OrderService orderService) {
+    public UserOrderController(OrderService orderService, OrderDetailService orderDetailService) {
         this.orderService = orderService;
+        this.orderDetailService = orderDetailService;
     }
 
     @PostMapping
@@ -29,5 +33,10 @@ public class UserOrderController {
     @GetMapping
     public List<OrderResponse> mine(Authentication auth) {
         return orderService.findMine(auth.getName());
+    }
+
+    @GetMapping("/{id}/details")
+    public OrderDetailResponse details(Authentication auth, @PathVariable Long id) {
+        return orderDetailService.findMine(auth.getName(), id);
     }
 }

@@ -47,6 +47,9 @@ public class Product {
     @Column(nullable = false, columnDefinition = "boolean not null default true")
     private boolean active = true;
 
+    @Column(name = "test_product", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean testProduct = false;
+
     @ManyToMany
     @JoinTable(
             name = "product_categories",

@@ -4,6 +4,8 @@ import { apiFetch } from "../api";
 import { addToCart } from "../cart";
 import AddToCart from "../components/AddToCart";
 import StoreHeader from "../components/StoreHeader";
+import StoreProduct from "../components/StoreProduct";
+import FavoriteButton from "../components/FavoriteButton";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
@@ -46,7 +48,8 @@ export default function ProductDetail() {
         const path = [];
         for (let node = deepest, guard = 0; node && guard < 20; node = parentOf(node), guard += 1) path.unshift({ id: Number(node.id), name: node.name });
         return path;
-    })();
+    })();
+
 
     useEffect(() => {
         let active = true;
@@ -95,12 +98,13 @@ export default function ProductDetail() {
                         </nav>
                         <article className="surface product-detail">
                         <div className="product-detail-image">
+                            <FavoriteButton product={product} />
                             {product.imageUrl
                                 ? <img src={product.imageUrl} alt={product.name} onError={(event) => { event.currentTarget.style.display = "none"; }} />
                                 : "▦"}
                         </div>
                         <div className="product-detail-info">
-                            <h1 className="page-title">{product.name}</h1>
+                            <h1 className="page-title">{product.name}{product.testProduct && <span className="badge badge-amber test-badge" title="Bu ürünü sadece yöneticiler görür">Test ürünü</span>}</h1>
                             {product.brandName && <div className="section-caption">Marka: <strong>{product.brandName}</strong></div>}
                             <div className="store-price" style={{ fontSize: 28 }}>{money(product.price)}</div>
                             <span className={`store-stock${stock <= 0 ? " out" : ""}`}>{stock > 0 ? `Stokta ${stock} adet` : "Tükendi"}</span>
@@ -109,7 +113,7 @@ export default function ProductDetail() {
                             </div>
                             <div className="product-actions">
                                 <AddToCart product={product} />
-                                <button className="button button-primary" disabled={stock <= 0} onClick={() => { addToCart(product); navigate("/checkout"); }}>
+                                <button className="button button-primary" disabled={stock <= 0} onClick={() => { if (addToCart(product)) navigate("/checkout"); }}>
                                     Hemen al
                                 </button>
                             </div>
@@ -152,32 +156,7 @@ export default function ProductDetail() {
                         <section style={{ marginTop: 28 }}>
                             <h2 className="section-title">Benzer ürünler</h2>
                             <div className="store-grid" style={{ marginTop: 14 }}>
-                                {similar.map((item) => {
-                                    const itemStock = Number(item.stock ?? 0);
-                                    return (
-                                        <article className="surface store-product" key={item.id} onClick={() => { navigate(`/product/${item.id}`); window.scrollTo(0, 0); }} style={{ cursor: "pointer" }}>
-                                            <div className="store-product-image">
-                                                {item.imageUrl ? <img src={item.imageUrl} alt={item.name} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : "▦"}
-                                            </div>
-                                            <div className="store-product-content">
-                                                <h3 className="store-product-name">{item.name}</h3>
-                                                <div className="store-product-bottom">
-                                                    <span className="store-price">{money(item.price)}</span>
-                                                    <span className={`store-stock${itemStock <= 0 ? " out" : ""}`}>{itemStock > 0 ? `Stokta ${itemStock}` : "Tükendi"}</span>
-                                                </div>
-                                            </div>
-                                            <div className="store-product-actions">
-                                                <div className="store-product-bottom">
-                                                    <span className="store-price">{money(item.price)}</span>
-                                                    <span className={`store-stock${itemStock <= 0 ? " out" : ""}`}>{itemStock > 0 ? `Stokta ${itemStock}` : "Tükendi"}</span>
-                                                </div>
-                                                <AddToCart product={item} className="button button-quiet button-small" />
-                                                <button className="button button-primary button-small" disabled={itemStock <= 0}
-                                                    onClick={(event) => { event.stopPropagation(); addToCart(item); navigate("/checkout"); }}>Hemen al</button>
-                                            </div>
-                                        </article>
-                                    );
-                                })}
+                                {similar.map((item) => <StoreProduct key={item.id} product={item} scrollOnOpen />)}
                             </div>
                         </section>
                     )}

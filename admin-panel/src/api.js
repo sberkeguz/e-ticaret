@@ -1,3 +1,5 @@
+import { clearSessionStorage } from "./favorites";
+
 const API_URL = "";
 
 export async function apiFetch(path, options = {}) {
@@ -16,7 +18,7 @@ export async function apiFetch(path, options = {}) {
         const body = await res.clone().json().catch(() => null);
 
         if (!body?.code) {
-            localStorage.clear();
+            clearSessionStorage();
             window.location.href = "/login";
             throw new Error("Oturum geçersiz");
         }

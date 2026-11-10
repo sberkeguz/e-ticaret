@@ -24,13 +24,17 @@ export default function AddToCart({ product, className = "button button-quiet" }
             <div className="qty-stepper" onClick={(event) => event.stopPropagation()}>
                 <button type="button" onClick={stop(() => (quantity <= 1 ? removeFromCart(product.id) : setQuantity(product.id, quantity - 1)))}>−</button>
                 <span>{quantity}</span>
-                <button type="button" disabled={stock > 0 && quantity >= stock} onClick={stop(() => addToCart(product))}>+</button>
+                <button type="button" disabled={quantity >= stock} onClick={stop(() => addToCart(product))}>+</button>
             </div>
         );
     }
 
+    if (stock <= 0) {
+        return <button type="button" className={className} disabled onClick={(event) => event.stopPropagation()}>Tükendi</button>;
+    }
+
     return (
-        <button type="button" className={className} disabled={stock <= 0} onClick={stop(() => addToCart(product))}>
+        <button type="button" className={className} onClick={stop(() => addToCart(product))}>
             Sepete ekle
         </button>
     );

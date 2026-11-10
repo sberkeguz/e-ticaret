@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { clearSessionStorage } from "../favorites";
 
 const navigation = [
     { to: "/admin", label: "Genel Bakış", icon: "⌂", end: true },
@@ -15,7 +16,7 @@ export default function AdminLayout({ children }) {
     const initials = username.slice(0, 2);
 
     const logout = () => {
-        localStorage.clear();
+        clearSessionStorage();
         navigate("/login");
     };
 

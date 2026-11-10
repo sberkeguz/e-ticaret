@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
-import { clearRemoved, getCart } from "../cart";
+import { getCart, syncCart } from "../cart";
 import StoreHeader from "../components/StoreHeader";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
@@ -11,17 +11,42 @@ const loadList = (path) => fetch(`${ADDRESS_API}/${path}`)
     .then((body) => (body.data ?? []).map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "tr")));
 const digits = (value) => value.replace(/\D/g, "");
 
+const blankCard = { holderName: "", number: "", expireMonth: "", expireYear: "", cvc: "" };
+const currentYear = new Date().getFullYear();
+const expireYears = Array.from({ length: 16 }, (_, index) => String(currentYear + index));
+const expireMonths = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+const groupCardNumber = (value) => digits(value).slice(0, 19).replace(/(\d{4})(?=\d)/g, "$1 ");
+const luhnValid = (number) => {
+    let sum = 0;
+    for (let index = 0; index < number.length; index += 1) {
+        let digit = Number(number[number.length - 1 - index]);
+        if (index % 2 === 1) { digit *= 2; if (digit > 9) digit -= 9; }
+        sum += digit;
+    }
+    return number.length >= 15 && sum % 10 === 0;
+};
+const PAYMENT_RESULTS = ["success", "failed", "review", "pending", "declined", "error"];
+
 const blankForm = {
-    firstName: "", lastName: "", phone: "", city: "", district: "", neighborhood: "", address: "",
-    cardHolder: "", cardNumber: "", expiry: "", cvv: "",
+    firstName: "", lastName: "", phone: "", email: "", identityNumber: "",
+    city: "", district: "", neighborhood: "", address: "",
 };
 
 export default function Checkout() {
-    const [items] = useState(getCart);
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const payOrderId = searchParams.get("order");
+    const [payOrder, setPayOrder] = useState(null);
+    const [items, setItems] = useState(() => (payOrderId ? [] : getCart()));
+    const [stockLoading, setStockLoading] = useState(true);
+    const [stockError, setStockError] = useState("");
     const [form, setForm] = useState(blankForm);
     const [error, setError] = useState("");
-    const [done, setDone] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [threeDSHtml, setThreeDSHtml] = useState("");
+    const [card, setCard] = useState(blankCard);
+    const threeDSFrame = useRef(null);
+    const [forceThreeDS, setForceThreeDS] = useState(false);
     const [provinces, setProvinces] = useState([]);
     const [districts, setDistricts] = useState([]);
     const [neighborhoods, setNeighborhoods] = useState([]);
@@ -29,6 +54,38 @@ export default function Checkout() {
     const [districtId, setDistrictId] = useState("");
     const [addressLoadFailed, setAddressLoadFailed] = useState(false);
     const [profileAddress, setProfileAddress] = useState(null);
+
+    useEffect(() => {
+        if (!payOrderId) return undefined;
+        let active = true;
+        apiFetch("/api/orders")
+            .then(async (response) => {
+                if (!response.ok) throw new Error("Sipariş yüklenemedi.");
+                const order = (await response.json()).find((item) => String(item.id) === payOrderId);
+                if (!order) throw new Error("Sipariş bulunamadı.");
+                if (order.status !== "Ödeme bekliyor") throw new Error("Bu siparişin ödemesi artık beklemede değil.");
+                if (!active) return;
+                setPayOrder(order);
+                setItems(order.items.map((item) => ({
+                    id: item.productId, name: item.productName, price: item.price,
+                    quantity: item.quantity, stock: item.quantity,
+                })));
+            })
+            .catch((loadError) => { if (active) setStockError(loadError.message || "Sipariş yüklenemedi."); })
+            .finally(() => { if (active) setStockLoading(false); });
+        return () => { active = false; };
+    }, [payOrderId]);
+
+    useEffect(() => {
+        if (payOrderId) return undefined;
+        let active = true;
+        const refresh = () => setItems(getCart());
+        window.addEventListener("cart-changed", refresh);
+        syncCart()
+            .catch((loadError) => { if (active) setStockError(loadError.message || "Sepet stokları kontrol edilemedi."); })
+            .finally(() => { if (active) setStockLoading(false); });
+        return () => { active = false; window.removeEventListener("cart-changed", refresh); };
+    }, []);
 
     useEffect(() => {
         loadList("provinces?fields=id,name&limit=100").then(setProvinces).catch(() => setAddressLoadFailed(true));
@@ -101,6 +158,7 @@ export default function Checkout() {
     };
 
     const total = items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+    const unavailable = items.filter((item) => item.quantity > Number(item.stock ?? 0));
     const lettersOnly = (value) => value.replace(/[^\p{L}\s'.-]/gu, "");
     const phoneChars = (value) => {
         const raw = digits(value).slice(0, 11);
@@ -108,85 +166,115 @@ export default function Checkout() {
     };
     const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
-    // Gerçek değer state'te tutulur; ekranda maskelenmiş hali gösterilir. Yazma sadece sona yapılır.
-    const reconcile = (previous, typed, max) => {
-        const chars = typed.replace(/[\s/]/g, "");
-        if (!chars.includes("*")) return digits(chars).slice(0, max);
-        if (chars.length <= previous.length) return previous.slice(0, chars.length);
-        return (previous + digits(chars.slice(previous.length))).slice(0, max);
-    };
-    const maskCard = (raw) => raw.split("").map((char, index) => (index < 6 || (raw.length === 16 && index >= 14) ? char : "*")).join("").replace(/(.{4})/g, "$1 ").trim();
-    const maskExpiry = (raw) => (raw.length > 2 ? `**/${"*".repeat(raw.length - 2)}` : "*".repeat(raw.length));
-    const formatExpiry = (value) => {
-        const raw = digits(value).slice(0, 4);
-        return raw.length > 2 ? `${raw.slice(0, 2)}/${raw.slice(2)}` : raw;
+    const updateCard = (field, value) => setCard((current) => ({ ...current, [field]: value }));
+
+    const cardError = () => {
+        const number = digits(card.number);
+        if (!card.holderName.trim()) return "Kart üzerindeki ismi girin.";
+        if (!luhnValid(number)) return "Kart numarası geçersiz.";
+        if (!card.expireMonth || !card.expireYear) return "Son kullanma tarihini seçin.";
+        const now = new Date();
+        if (Number(card.expireYear) === now.getFullYear() && Number(card.expireMonth) < now.getMonth() + 1) return "Kartın son kullanma tarihi geçmiş.";
+        if (!/^\d{3,4}$/.test(card.cvc)) return "CVC 3 veya 4 haneli olmalı.";
+        return "";
     };
 
     const submit = async (event) => {
         event.preventDefault();
+        if (saving || threeDSHtml) return;
         setError("");
-        if (!form.firstName.trim() || !form.lastName.trim()) return setError("Ad ve soyad zorunlu.");
-        if (!/^(\+90|0)?\s?\(?5\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}$/.test(form.phone.trim())) return setError("Geçerli bir telefon numarası girin (05xx xxx xx xx).");
-        if (!form.city || !form.district || !form.neighborhood || !form.address.trim()) return setError("İl, ilçe, mahalle ve açık adres zorunlu.");
-        if (!form.cardHolder.trim()) return setError("Kart üzerindeki ismi girin.");
-        if (digits(form.cardNumber).length !== 16) return setError("Kart numarası 16 haneli olmalı.");
-        const [month, year] = form.expiry.split("/");
-        if (!month || !year || year.length !== 2 || Number(month) < 1 || Number(month) > 12) return setError("Son kullanma tarihi AA/YY biçiminde olmalı.");
-        const now = new Date();
-        if (2000 + Number(year) < now.getFullYear() || (2000 + Number(year) === now.getFullYear() && Number(month) < now.getMonth() + 1)) return setError("Kartın son kullanma tarihi geçmiş.");
-        if (form.cvv.length !== 3) return setError("CVV 3 haneli olmalı.");
-        // Kart bilgisi sunucuya gönderilmez; sadece teslimat bilgisi ve ürünler kaydedilir.
+        if (stockLoading || stockError) return setError(stockError || "Sepet stokları doğrulanamadı. Lütfen tekrar deneyin.");
+        if (unavailable.length) return setError("Sepetinizde yeterli stoğu olmayan ürünler var. Sipariş vermek için sepetinizi düzenleyin.");
+        if (!payOrderId) {
+            if (!form.firstName.trim() || !form.lastName.trim()) return setError("Ad ve soyad zorunlu.");
+            if (!/^(\+90|0)?\s?\(?5\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}$/.test(form.phone.trim())) return setError("Geçerli bir telefon numarası girin (05xx xxx xx xx).");
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return setError("Geçerli bir e-posta adresi girin.");
+        if (!/^\d{11}$/.test(form.identityNumber)) return setError("T.C. kimlik numarası 11 haneli olmalı.");
+        if (!payOrderId && (!form.city || !form.district || !form.neighborhood || !form.address.trim())) return setError("İl, ilçe, mahalle ve açık adres zorunlu.");
+        const invalidCard = cardError();
+        if (invalidCard) return setError(invalidCard);
+
+        const cardBody = {
+            holderName: card.holderName.trim(),
+            number: digits(card.number),
+            expireMonth: card.expireMonth,
+            expireYear: card.expireYear,
+            cvc: card.cvc,
+        };
+        const body = payOrderId
+            ? { email: form.email.trim(), identityNumber: form.identityNumber, forceThreeDS, card: cardBody }
+            : {
+                firstName: form.firstName.trim(),
+                lastName: form.lastName.trim(),
+                phone: form.phone.trim(),
+                email: form.email.trim(),
+                identityNumber: form.identityNumber,
+                forceThreeDS,
+                city: form.city.trim(),
+                district: form.district.trim(),
+                neighborhood: form.neighborhood,
+                address: form.address.trim(),
+                items: items.map((item) => ({ productId: item.id, quantity: item.quantity })),
+                card: cardBody,
+            };
+
         setSaving(true);
         try {
-            const response = await apiFetch("/api/orders", {
+            const response = await apiFetch(payOrderId ? `/api/payments/orders/${encodeURIComponent(payOrderId)}/pay` : "/api/payments/checkout", {
                 method: "POST",
-                body: JSON.stringify({
-                    firstName: form.firstName.trim(),
-                    lastName: form.lastName.trim(),
-                    phone: form.phone.trim(),
-                    city: form.city.trim(),
-                    district: form.district.trim(),
-                    neighborhood: form.neighborhood,
-                    address: form.address.trim(),
-                    items: items.map((item) => ({ productId: item.id, quantity: item.quantity })),
-                }),
+                body: JSON.stringify(body),
             });
-            if (!response.ok) {
-                const body = await response.json().catch(() => null);
-                throw new Error(body?.message || "Sipariş kaydedilemedi.");
+            const result = await response.json().catch(() => null);
+            if (!response.ok) throw new Error(result?.message || "Ödeme alınamadı.");
+            setCard((current) => ({ ...current, number: "", cvc: "" }));
+            if (result?.result === "threeds" && result.threeDSHtmlContent) {
+                setThreeDSHtml(result.threeDSHtmlContent);
+                setSaving(false);
+                return;
             }
+            const outcome = PAYMENT_RESULTS.includes(result?.result) ? result.result : "pending";
+            navigate(`/orders?payment=${outcome}`, { replace: true });
         } catch (saveError) {
             setSaving(false);
-            return setError(saveError.message || "Sipariş kaydedilemedi.");
+            setError(saveError.message || "Ödeme alınamadı.");
         }
-        setSaving(false);
-        clearRemoved();
-        localStorage.setItem("cart", "[]");
-        window.dispatchEvent(new Event("cart-changed"));
-        setDone(true);
+    };
+
+    // 3D Secure bitince iyzico, backend'deki dönüş sayfasını (ör. ngrok adresi) iframe'de açar.
+    // O sayfa sonucu postMessage ile bildirir; yalnızca kendi iframe'imizden gelen mesajı kabul ederiz.
+    useEffect(() => {
+        if (!threeDSHtml) return undefined;
+        const onMessage = (event) => {
+            if (!threeDSFrame.current || event.source !== threeDSFrame.current.contentWindow) return;
+            const data = event.data;
+            if (data?.type !== "iyzico-payment-result" || !PAYMENT_RESULTS.includes(data.result)) return;
+            navigate(`/orders?payment=${encodeURIComponent(data.result)}`, { replace: true });
+        };
+        window.addEventListener("message", onMessage);
+        return () => window.removeEventListener("message", onMessage);
+    }, [threeDSHtml, navigate]);
+
+    const handlePaymentFrameLoad = (event) => {
+        let location;
+        try {
+            location = event.currentTarget.contentWindow.location;
+            if (location.origin !== window.location.origin || location.pathname !== "/orders") return;
+            const result = new URLSearchParams(location.search).get("payment");
+            if (PAYMENT_RESULTS.includes(result)) {
+                navigate(`/orders?payment=${encodeURIComponent(result)}`, { replace: true });
+            }
+        } catch (loadError) {
+            if (loadError.name !== "SecurityError") throw loadError;
+        }
     };
 
     const header = (
-        <StoreHeader />
+        <StoreHeader syncCartOnMount={false} />
     );
+    const locked = saving || Boolean(threeDSHtml);
 
-    if (done) {
-        return (
-            <div className="storefront">
-                {header}
-                <main className="store-content">
-                    <div className="surface empty-state">
-                        <h3>Siparişiniz alındı 🎉</h3>
-                        <p className="page-subtitle">Teşekkürler {form.firstName}! Siparişiniz hazırlanıyor.</p>
-                        <Link className="button button-primary" to="/orders">Siparişimi takip et</Link>
-                        <Link className="button button-quiet" to="/home">Alışverişe devam et</Link>
-                    </div>
-                </main>
-            </div>
-        );
-    }
-
-    if (items.length === 0) {
+    if (!payOrderId && items.length === 0) {
         return (
             <div className="storefront">
                 {header}
@@ -200,15 +288,40 @@ export default function Checkout() {
         );
     }
 
+    const contactFields = (
+        <>
+            <label className="field">
+                <span className="field-label">E-posta</span>
+                <input className="input" required type="email" maxLength={254} autoComplete="email" value={form.email} onChange={(event) => update("email", event.target.value)} />
+            </label>
+            <label className="field">
+                <span className="field-label">T.C. kimlik numarası</span>
+                <input className="input" required inputMode="numeric" autoComplete="off" maxLength={11} value={form.identityNumber} onChange={(event) => update("identityNumber", digits(event.target.value).slice(0, 11))} />
+            </label>
+        </>
+    );
+
     return (
         <div className="storefront">
             {header}
             <main className="store-content">
-                <h1 className="page-title">Satın al</h1>
+                <h1 className="page-title">{payOrderId ? "Siparişi öde" : "Satın al"}</h1>
                 <form className="checkout-layout" noValidate onSubmit={submit}>
                     <div className="checkout-forms">
                         <section className="surface surface-pad">
                             <h2 className="section-title">Teslimat bilgileri</h2>
+                            {payOrderId ? (
+                                <fieldset className="checkout-delivery-fields" disabled={locked}>
+                                    {payOrder && (
+                                        <p className="section-caption">
+                                            {payOrder.firstName} {payOrder.lastName}, {payOrder.phone}<br />
+                                            {payOrder.neighborhood} Mah. {payOrder.address}, {payOrder.district}/{payOrder.city}
+                                        </p>
+                                    )}
+                                    <div className="form-grid">{contactFields}</div>
+                                </fieldset>
+                            ) : (
+                            <fieldset className="checkout-delivery-fields" disabled={locked}>
                             <div className="form-grid">
                                 <label className="field">
                                     <span className="field-label">Ad</span>
@@ -222,6 +335,7 @@ export default function Checkout() {
                                     <span className="field-label">Telefon</span>
                                     <input className="input" required type="tel" maxLength={14} autoComplete="tel" placeholder="05xx xxx xx xx" value={form.phone} onChange={(event) => update("phone", phoneChars(event.target.value))} />
                                 </label>
+                                {contactFields}
                                 <label className="field">
                                     <span className="field-label">İl</span>
                                     <select className="input" required value={provinceId} onChange={(event) => pickProvince(event.target.value)}>
@@ -249,28 +363,50 @@ export default function Checkout() {
                                     <textarea className="input" required rows={3} maxLength={300} autoComplete="street-address" value={form.address} onChange={(event) => update("address", event.target.value)} />
                                 </label>
                             </div>
+                            </fieldset>
+                            )}
                         </section>
 
                         <section className="surface surface-pad">
-                            <h2 className="section-title">Ödeme bilgileri</h2>
-                            <div className="form-grid">
-                                <label className="field span-2">
-                                    <span className="field-label">Kart üzerindeki isim</span>
-                                    <input className="input" required maxLength={80} autoComplete="cc-name" value={form.cardHolder} onChange={(event) => update("cardHolder", lettersOnly(event.target.value))} />
-                                </label>
-                                <label className="field span-2">
-                                    <span className="field-label">Kart numarası</span>
-                                    <input className="input" required inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" value={maskCard(digits(form.cardNumber))} onChange={(event) => update("cardNumber", reconcile(digits(form.cardNumber), event.target.value, 16))} />
-                                </label>
-                                <label className="field">
-                                    <span className="field-label">Son kullanma (AA/YY)</span>
-                                    <input className="input" required inputMode="numeric" autoComplete="cc-exp" placeholder="AA/YY" value={maskExpiry(digits(form.expiry))} onChange={(event) => update("expiry", formatExpiry(reconcile(digits(form.expiry), event.target.value, 4)))} />
-                                </label>
-                                <label className="field">
-                                    <span className="field-label">CVV</span>
-                                    <input className="input" required inputMode="numeric" autoComplete="cc-csc" maxLength={3} placeholder="123" value={"*".repeat(form.cvv.length)} onChange={(event) => update("cvv", reconcile(form.cvv, event.target.value, 3))} />
-                                </label>
-                            </div>
+                            <h2 className="section-title">Kart bilgileri</h2>
+                            <p className="page-subtitle">Kart bilgileriniz yalnızca ödeme için iyzico'ya iletilir; bu sitede saklanmaz.</p>
+                            {threeDSHtml ? (
+                                <>
+                                    <p className="section-caption">Bankanızın 3D Secure doğrulamasını tamamlayın.</p>
+                                    <iframe ref={threeDSFrame} className="checkout-payment-frame" title="3D Secure doğrulama"
+                                        srcDoc={threeDSHtml} onLoad={handlePaymentFrameLoad} />
+                                </>
+                            ) : (
+                                <fieldset className="checkout-card-fields" disabled={locked}>
+                                    <div className="form-grid">
+                                        <label className="field span-2">
+                                            <span className="field-label">Kart üzerindeki isim</span>
+                                            <input className="input" required maxLength={100} autoComplete="cc-name" value={card.holderName} onChange={(event) => updateCard("holderName", lettersOnly(event.target.value))} />
+                                        </label>
+                                        <label className="field span-2">
+                                            <span className="field-label">Kart numarası</span>
+                                            <input className="input" required inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000" maxLength={23} value={card.number} onChange={(event) => updateCard("number", groupCardNumber(event.target.value))} />
+                                        </label>
+                                        <div className="field">
+                                            <span className="field-label">Son kullanma tarihi</span>
+                                            <div className="checkout-expiry">
+                                                <select className="input" required aria-label="Ay" autoComplete="cc-exp-month" value={card.expireMonth} onChange={(event) => updateCard("expireMonth", event.target.value)}>
+                                                    <option value="">Ay</option>
+                                                    {expireMonths.map((month) => <option key={month} value={month}>{month}</option>)}
+                                                </select>
+                                                <select className="input" required aria-label="Yıl" autoComplete="cc-exp-year" value={card.expireYear} onChange={(event) => updateCard("expireYear", event.target.value)}>
+                                                    <option value="">Yıl</option>
+                                                    {expireYears.map((year) => <option key={year} value={year}>{year}</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <label className="field">
+                                            <span className="field-label">CVC</span>
+                                            <input className="input" required inputMode="numeric" autoComplete="cc-csc" maxLength={4} value={card.cvc} onChange={(event) => updateCard("cvc", digits(event.target.value).slice(0, 4))} />
+                                        </label>
+                                    </div>
+                                </fieldset>
+                            )}
                         </section>
                     </div>
 
@@ -283,8 +419,23 @@ export default function Checkout() {
                             </div>
                         ))}
                         <div className="checkout-line checkout-total"><span>Toplam</span><b>{money(total)}</b></div>
+                        {stockLoading && <p>{payOrderId ? "Sipariş yükleniyor…" : "Stoklar kontrol ediliyor…"}</p>}
+                        {stockError && <p className="error-banner" role="alert">{stockError}</p>}
+                        {!stockLoading && unavailable.length > 0 && <p className="error-banner" role="alert">Yeterli stok yok: {unavailable.map((item) => item.name).join(", ")}. <Link to="/cart">Sepeti düzenle</Link></p>}
+                        <button
+                            className={`button ${forceThreeDS ? "button-primary" : "button-quiet"}`}
+                            type="button"
+                            disabled={locked}
+                            aria-pressed={forceThreeDS}
+                            onClick={() => setForceThreeDS((enabled) => !enabled)}
+                        >
+                            3D Secure: {forceThreeDS ? "Açık" : "Kapalı"}
+                        </button>
+                        <p className="section-caption">Açıkken bankanızın doğrulama ekranı bu sayfada açılır.</p>
                         {error && <p className="error-banner" role="alert">{error}</p>}
-                        <button className="button button-primary" type="submit" disabled={saving}>{saving ? "Kaydediliyor..." : "Siparişi tamamla"}</button>
+                        <button className="button button-primary" type="submit" disabled={locked || stockLoading || Boolean(stockError) || unavailable.length > 0}>
+                            {saving ? "Ödeme alınıyor..." : threeDSHtml ? "Banka doğrulaması bekleniyor" : `${money(total)} öde`}
+                        </button>
                     </aside>
                 </form>
             </main>

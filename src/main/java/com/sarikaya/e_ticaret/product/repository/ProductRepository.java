@@ -15,6 +15,8 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findAllByActiveTrue();
 
+    List<Product> findAllByActiveTrueAndTestProductFalse();
+
 
 @Lock(LockModeType.PESSIMISTIC_WRITE)
 @Query("select p from Product p where p.id = :id")

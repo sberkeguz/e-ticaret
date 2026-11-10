@@ -6,9 +6,13 @@ import com.sarikaya.e_ticaret.cart.entity.CartItem;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
+import com.sarikaya.e_ticaret.exception.PaymentInProgressException;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
+import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
+import com.sarikaya.e_ticaret.user.entity.Role;
 import com.sarikaya.e_ticaret.user.entity.User;
+import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +29,8 @@ public class CartService {
 
     private final CartItemRepository cartItemRepository;
     private final ProductRepository productRepository;
+    private final UserRepository userRepository;
+    private final PaymentRepository paymentRepository;
 
     @Transactional(readOnly = true)
     public List<CartItemResponse> getCart(User user) {
@@ -36,6 +42,11 @@ public class CartService {
 
     @Transactional
     public List<CartItemResponse> replaceCart(User user, CartRequest request) {
+        user = userRepository.findByIdForUpdate(user.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
+        if (paymentRepository.existsByOrder_User_IdAndStatusIn(user.getId(), List.of("PENDING"))) {
+            throw new PaymentInProgressException("Devam eden ödemeniz varken sepet değiştirilemez.");
+        }
         Map<Long, CartItem> existingByProduct = new HashMap<>();
         for (CartItem item : cartItemRepository.findByUser_IdOrderByIdAsc(user.getId())) {
             existingByProduct.put(item.getProduct().getId(), item);
@@ -49,8 +60,10 @@ public class CartService {
 
             Product product = productRepository.findByIdAndActiveTrue(requested.productId())
                     .orElseThrow(() -> new ResourceNotFoundException("Sepetteki ürün bulunamadı."));
-            if (requested.quantity() > product.getStock()) {
-                throw new BadRequestException("Stok miktarı aşıldı: " + product.getName());
+
+            boolean userIsAdmin = user.getRole() == Role.ADMIN;
+            if (product.isTestProduct() && !userIsAdmin) {
+                throw new ResourceNotFoundException("Sepetteki ürün bulunamadı.");
             }
 
             CartItem item = existingByProduct.remove(product.getId());

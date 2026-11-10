@@ -16,6 +16,7 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Profile from "./pages/Profile";
 import MyOrders from "./pages/MyOrders";
+import Favorites from "./pages/Favorites";
 
 export default function App() {
     return (
@@ -142,6 +143,7 @@ export default function App() {
             />
 
             <Route path="/orders" element={<ProtectedRoute><MyOrders /></ProtectedRoute>} />
+            <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
 
             <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
-import { addToCart } from "../cart";
-import AddToCart from "../components/AddToCart";
 import CategoryPicker from "../components/CategoryPicker";
 import StoreHeader from "../components/StoreHeader";
+import StoreProduct from "../components/StoreProduct";
 
-const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const getParentIds = (category) => Array.isArray(category.parentIds)
     ? category.parentIds
     : category.parentId == null ? [] : [category.parentId];
 
 export default function UserHome() {
-    const navigate = useNavigate();
     const [categories, setCategories] = useState([]);
     const [allProducts, setAllProducts] = useState([]);
     const [error, setError] = useState("");
@@ -203,32 +199,7 @@ export default function UserHome() {
                         </div>
                         {loading ? <div className="loading-state">Mağaza kataloğu hazırlanıyor…</div> : products.length ? (
                             <div className="store-grid">
-                                {products.map((product) => {
-                                    const quantity = Number(product.stock ?? 0);
-                                    return (
-                                        <article className="surface store-product" key={product.id} onClick={() => navigate(`/product/${product.id}`)} style={{ cursor: "pointer" }}>
-                                            <div className="store-product-image">
-                                                {product.imageUrl ? <img src={product.imageUrl} alt={product.name} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : "▦"}
-                                            </div>
-                                            <div className="store-product-content">
-                                                <h3 className="store-product-name">{product.name}</h3>
-                                                <div className="store-product-bottom">
-                                                    <span className="store-price">{money(product.price)}</span>
-                                                    <span className={`store-stock${quantity <= 0 ? " out" : ""}`}>{quantity > 0 ? `Stokta ${quantity}` : "Tükendi"}</span>
-                                                </div>
-                                            </div>
-                                            <div className="store-product-actions">
-                                                <div className="store-product-bottom">
-                                                    <span className="store-price">{money(product.price)}</span>
-                                                    <span className={`store-stock${quantity <= 0 ? " out" : ""}`}>{quantity > 0 ? `Stokta ${quantity}` : "Tükendi"}</span>
-                                                </div>
-                                                <AddToCart product={product} className="button button-quiet button-small" />
-                                                <button className="button button-primary button-small" disabled={quantity <= 0}
-                                                    onClick={(event) => { event.stopPropagation(); addToCart(product); navigate("/checkout"); }}>Hemen al</button>
-                                            </div>
-                                        </article>
-                                    );
-                                })}
+                                {products.map((product) => <StoreProduct key={product.id} product={product} />)}
                             </div>
                         ) : (
                             <div className="surface empty-state">

@@ -1,0 +1,30 @@
+package com.sarikaya.e_ticaret.payment.repository;
+
+import com.sarikaya.e_ticaret.payment.entity.Payment;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+public interface PaymentRepository extends JpaRepository<Payment, Long> {
+    Optional<Payment> findByOrder_Id(Long orderId);
+
+    boolean existsByOrder_User_IdAndStatusIn(Long userId, List<String> statuses);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.token = :token")
+    Optional<Payment> findByTokenForUpdate(@Param("token") String token);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.order.id = :orderId")
+    Optional<Payment> findByOrderIdForUpdate(@Param("orderId") Long orderId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    List<Payment> findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+            String status, LocalDateTime createdAt);
+}

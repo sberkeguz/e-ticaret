@@ -1,92 +1,122 @@
 import { useMemo, useState } from "react";
-
-const parentsOf = (category) => Array.isArray(category.parentIds)
-    ? category.parentIds
-    : category.parentId == null ? [] : [category.parentId];
+import { buildCategoryIndex } from "../categoryTree";
 
 export default function CategoryPicker({ categories, selectedIds, onChange, onClose }) {
+    const index = useMemo(() => buildCategoryIndex(categories), [categories]);
     const [search, setSearch] = useState("");
-    const [draft, setDraft] = useState(selectedIds.map(String));
+    const [draft, setDraft] = useState(() => new Set(selectedIds.map(Number)));
+    const [withParents, setWithParents] = useState(true);
+    const [expanded, setExpanded] = useState(() => {
+        const open = new Set(index.roots.map((root) => Number(root.id)));
+        selectedIds.forEach((id) => index.ancestorsOf(id).forEach((ancestor) => open.add(ancestor)));
+        return open;
+    });
 
-    const names = useMemo(() => new Map(categories.map((category) => [String(category.id), category.name])), [categories]);
     const term = search.trim().toLocaleLowerCase("tr");
-    const rows = useMemo(() => {
-        const all = categories.map((category) => ({
-            id: String(category.id),
-            name: category.name,
-            parentIds: parentsOf(category).map(String),
-            parents: parentsOf(category).map((parentId) => names.get(String(parentId))).filter(Boolean),
-            depth: 0,
-            hasChildren: categories.some((other) => parentsOf(other).map(String).includes(String(category.id))),
-        })).sort((a, b) => a.name.localeCompare(b.name, "tr"));
-        if (term) {
-            return all.filter((row) => row.name.toLocaleLowerCase("tr").includes(term) || row.parents.join(" ").toLocaleLowerCase("tr").includes(term));
-        }
-        const ordered = [];
-        const seen = new Set();
-        const walk = (row, depth) => {
-            if (seen.has(row.id)) return;
-            seen.add(row.id);
-            ordered.push({ ...row, depth });
-            if (draft.includes(row.id)) {
-                all.filter((child) => child.parentIds.includes(row.id)).forEach((child) => walk(child, depth + 1));
+    const visibleIds = useMemo(() => {
+        if (!term) return null;
+        const visible = new Set();
+        for (const category of categories) {
+            if (category.name.toLocaleLowerCase("tr").includes(term)) {
+                visible.add(Number(category.id));
+                index.ancestorsOf(category.id).forEach((id) => visible.add(id));
             }
-        };
-        all.filter((row) => row.parentIds.length === 0).forEach((row) => walk(row, 0));
-        return ordered;
-    }, [categories, names, term, draft]);
+        }
+        return visible;
+    }, [categories, index, term]);
 
-    const allVisible = rows.length > 0 && rows.every((row) => draft.includes(row.id));
-    const toggle = (id) => setDraft((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
-    const toggleAll = () => setDraft((current) => allVisible
-        ? current.filter((id) => !rows.some((row) => row.id === id))
-        : [...new Set([...current, ...rows.map((row) => row.id)])]);
+    const toggleSelected = (id) => setDraft((current) => {
+        const next = new Set(current);
+        if (next.has(id)) {
+            next.delete(id);
+        } else {
+            next.add(id);
+            if (withParents) index.ancestorsOf(id).forEach((ancestor) => next.add(ancestor));
+        }
+        return next;
+    });
+    const toggleOpen = (id) => setExpanded((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+
+    const renderNode = (category, depth, trail) => {
+        const id = Number(category.id);
+        if (trail.has(id) || (visibleIds && !visibleIds.has(id))) return null;
+        const kids = index.children.get(id) ?? [];
+        const isOpen = term ? true : expanded.has(id);
+        const checked = draft.has(id);
+        const selectedBelow = [...index.descendantsOf(id)].filter((child) => draft.has(child)).length;
+        const nextTrail = new Set(trail).add(id);
+        return (
+            <li key={`${[...trail].join("-")}-${id}`}>
+                <div className={`picker-node${checked ? " checked" : ""}`} style={{ "--depth": depth }}>
+                    <button type="button" className={`category-toggle${kids.length ? "" : " leaf"}${isOpen ? " open" : ""}`}
+                        onClick={() => kids.length && toggleOpen(id)} tabIndex={kids.length ? 0 : -1}
+                        aria-label={kids.length ? (isOpen ? "Daralt" : "Genişlet") : undefined}>{kids.length ? "›" : "•"}</button>
+                    <label className="picker-node-label">
+                        <input type="checkbox" checked={checked} onChange={() => toggleSelected(id)} />
+                        <span className="picker-name">{category.name}</span>
+                        {!isOpen && selectedBelow > 0 && <span className="category-pill info">{selectedBelow} seçili alt</span>}
+                    </label>
+                </div>
+                {kids.length > 0 && isOpen && <ul>{kids.map((child) => renderNode(child, depth + 1, nextTrail))}</ul>}
+            </li>
+        );
+    };
+
+    const selectedList = [...draft].map((id) => index.byId.get(id)).filter(Boolean)
+        .sort((a, b) => index.pathOf(a.id).join(" › ").localeCompare(index.pathOf(b.id).join(" › "), "tr"));
 
     return (
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
             <div className="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-label="Kategori seç">
                 <div className="modal-head">
                     <div>
-                        <h2>Kategoriler</h2>
-                        <p>Ana kategoriyi işaretleyince alt kategorileri açılır. Arama tüm kategorilerde çalışır.</p>
+                        <h2>Kategori seç</h2>
+                        <p>Ürünün görüneceği kategorileri işaretleyin. Aramada eşleşen kategoriler üst kategorileriyle birlikte gösterilir.</p>
                     </div>
-                    <button type="button" className="button button-quiet button-small" onClick={onClose}>✕</button>
+                    <button type="button" className="button button-quiet button-small" onClick={onClose} aria-label="Kapat">✕</button>
                 </div>
-                <div className="modal-body">
-                    <input className="input" placeholder="Kategori ara…" value={search} onChange={(event) => setSearch(event.target.value)} autoFocus />
-                    <div className="picker-table-wrap">
-                        <table className="picker-table">
-                            <thead>
-                                <tr>
-                                    <th><label className="picker-item"><input type="checkbox" checked={allVisible} onChange={toggleAll} aria-label="Tümünü seç" /><span>Kategori</span></label></th>
-                                    <th>Üst kategori</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.length ? rows.map((row) => {
-                                    const checked = draft.includes(row.id);
-                                    return (
-                                        <tr key={row.id} className={checked ? "checked" : ""} onClick={() => toggle(row.id)}>
-                                            <td>
-                                                <div className={`picker-item${row.depth ? " child" : ""}`} style={{ marginLeft: row.depth * 28 }}>
-                                                    {row.depth > 0 && <span className="picker-arrow">↳</span>}
-                                                    <input type="checkbox" checked={checked} onChange={() => toggle(row.id)} onClick={(event) => event.stopPropagation()} />
-                                                    <span className="picker-name">{row.name}</span>
-                                                    {row.hasChildren && !term && <span className={`picker-chevron${checked ? " open" : ""}`}>›</span>}
-                                                </div>
-                                            </td>
-                                            <td className="picker-parent">{row.parents.length ? row.parents.join(", ") : "—"}</td>
-                                        </tr>
-                                    );
-                                }) : <tr><td colSpan={2} className="picker-empty">Kategori bulunamadı.</td></tr>}
-                            </tbody>
-                        </table>
+                <div className="modal-body picker-body">
+                    <div className="picker-tools">
+                        <div className="search-field" style={{ flex: 1 }}>
+                            <span className="search-glyph">⌕</span>
+                            <input className="input" placeholder="Kategori ara…" value={search} onChange={(event) => setSearch(event.target.value)} autoFocus />
+                        </div>
+                        <label className="picker-switch" title="Bir alt kategori seçildiğinde üst kategorileri de otomatik seçilir">
+                            <input type="checkbox" checked={withParents} onChange={(event) => setWithParents(event.target.checked)} />
+                            <span>Üst kategorileri de seç</span>
+                        </label>
+                    </div>
+                    <div className="picker-columns">
+                        <div className="picker-tree-wrap">
+                            {visibleIds && visibleIds.size === 0
+                                ? <p className="picker-empty">Kategori bulunamadı.</p>
+                                : <ul className="picker-tree">{index.roots.map((root) => renderNode(root, 0, new Set()))}</ul>}
+                        </div>
+                        <aside className="picker-selected">
+                            <div className="field-label">Seçilenler · {draft.size}</div>
+                            {selectedList.length ? (
+                                <ul>
+                                    {selectedList.map((category) => (
+                                        <li key={category.id}>
+                                            <span title={index.pathOf(category.id).join(" › ")}>
+                                                {index.pathOf(category.id).length > 1 && <small>{index.pathOf(category.id).slice(0, -1).join(" › ")} › </small>}
+                                                {category.name}
+                                            </span>
+                                            <button type="button" aria-label={`${category.name} seçimini kaldır`} onClick={() => toggleSelected(Number(category.id))}>✕</button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : <p className="section-caption">Henüz kategori seçilmedi.</p>}
+                        </aside>
                     </div>
                 </div>
                 <div className="modal-actions">
-                    <span className="picker-count">{draft.length} kategori seçili</span>
-                    <button type="button" className="button button-quiet" onClick={() => setDraft([])}>Temizle</button>
-                    <button type="button" className="button button-primary" onClick={() => { onChange(draft); onClose(); }}>Seçimi uygula</button>
+                    <button type="button" className="button button-quiet" onClick={() => setDraft(new Set())} disabled={!draft.size}>Temizle</button>
+                    <button type="button" className="button button-primary" onClick={() => { onChange([...draft].map(String)); onClose(); }}>Seçimi uygula</button>
                 </div>
             </div>
         </div>

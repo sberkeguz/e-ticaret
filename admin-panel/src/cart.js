@@ -1,7 +1,9 @@
 import { apiFetch } from "./api";
 
 const KEY = "cart";
+const SYNCED_USER_KEY = "cart-synced-user";
 let syncQueue = Promise.resolve();
+let syncFailure = null;
 
 export const getCart = () => {
     try {
@@ -15,7 +17,8 @@ const save = (items) => {
     localStorage.setItem(KEY, JSON.stringify(items));
     window.dispatchEvent(new Event("cart-changed"));
     if (localStorage.getItem("token")) {
-        syncQueue = syncQueue.then(() => persistCart()).catch((error) => {
+        syncQueue = syncQueue.then(() => persistCart()).then(() => { syncFailure = null; }).catch((error) => {
+            syncFailure = error.restored ? null : { username: localStorage.getItem("username"), error };
             window.dispatchEvent(new CustomEvent("cart-sync-error", {
                 detail: { message: error.message || "Sepet sunucuyla eşitlenemedi." },
             }));
@@ -24,6 +27,7 @@ const save = (items) => {
 };
 
 const persistCart = async () => {
+    const username = localStorage.getItem("username");
     const response = await apiFetch("/api/cart", {
         method: "PUT",
         body: JSON.stringify({
@@ -32,7 +36,18 @@ const persistCart = async () => {
     });
     if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.message || "Sepet sunucuyla eşitlenemedi.");
+        const error = new Error(body?.message || "Sepet sunucuyla eşitlenemedi.");
+        if (body?.code === "PAYMENT_IN_PROGRESS" && username === localStorage.getItem("username")) {
+            const current = await apiFetch("/api/cart");
+            if (!current.ok) throw new Error(`${error.message} Sepet yeniden yüklenemedi.`);
+            const items = fromServer(await current.json());
+            if (username === localStorage.getItem("username")) {
+                localStorage.setItem(KEY, JSON.stringify(items));
+                window.dispatchEvent(new Event("cart-changed"));
+                error.restored = true;
+            }
+        }
+        throw error;
     }
 };
 
@@ -46,7 +61,10 @@ const fromServer = (items) => items.map((item) => ({
 }));
 
 export const syncCart = async () => {
-    if (!localStorage.getItem("token")) return;
+    const username = localStorage.getItem("username");
+    if (!localStorage.getItem("token") || !username) return;
+    await syncQueue;
+    if (syncFailure?.username === username) throw syncFailure.error;
     const response = await apiFetch("/api/cart");
     if (!response.ok) {
         const body = await response.json().catch(() => null);
@@ -56,18 +74,20 @@ export const syncCart = async () => {
     const serverItems = fromServer(await response.json());
     const localItems = getCart();
     const merged = new Map(serverItems.map((item) => [item.id, item]));
-    for (const localItem of localItems) {
-        const current = merged.get(localItem.id);
-        const quantity = (current?.quantity ?? 0) + localItem.quantity;
-        merged.set(localItem.id, {
-            ...current,
-            ...localItem,
-            quantity: Math.min(quantity, Number(localItem.stock) || quantity),
-        });
+    if (localStorage.getItem(SYNCED_USER_KEY) !== username) {
+        for (const localItem of localItems) {
+            const current = merged.get(localItem.id);
+            const quantity = Math.min(99, (current?.quantity ?? 0) + localItem.quantity);
+            merged.set(localItem.id, {
+                ...current,
+                ...localItem,
+                quantity,
+            });
+        }
     }
 
-    const items = [...merged.values()];
-    if (localItems.length > 0) {
+    let items = [...merged.values()];
+    if (localStorage.getItem(SYNCED_USER_KEY) !== username && localItems.length > 0) {
         const saveResponse = await apiFetch("/api/cart", {
             method: "PUT",
             body: JSON.stringify({
@@ -78,8 +98,10 @@ export const syncCart = async () => {
             const body = await saveResponse.json().catch(() => null);
             throw new Error(body?.message || "Sepet sunucuyla eşitlenemedi.");
         }
+        items = fromServer(await saveResponse.json());
     }
 
+    localStorage.setItem(SYNCED_USER_KEY, username);
     localStorage.setItem(KEY, JSON.stringify(items));
     window.dispatchEvent(new Event("cart-changed"));
 };
@@ -97,12 +119,14 @@ export const getRemoved = () => {
 const saveRemoved = (items) => localStorage.setItem(REMOVED_KEY, JSON.stringify(items.slice(0, 20)));
 
 export const addToCart = (product) => {
+    const stock = Number(product.stock ?? 0);
+    // Stok 0 "tükendi" demektir; tükenen ürün sepete eklenmez.
+    if (stock <= 0) return false;
     saveRemoved(getRemoved().filter((item) => item.id !== product.id));
     const items = getCart();
-    const stock = Number(product.stock ?? 0);
     const existing = items.find((item) => item.id === product.id);
     if (existing) {
-        existing.quantity = Math.min(existing.quantity + 1, stock || existing.quantity + 1);
+        if (existing.quantity < stock) existing.quantity = Math.min(existing.quantity + 1, 99);
         existing.stock = stock;
     } else {
         items.push({
@@ -111,11 +135,12 @@ export const addToCart = (product) => {
         });
     }
     save(items);
+    return true;
 };
 
 export const setQuantity = (id, quantity) => {
     save(getCart().map((item) => item.id === id
-        ? { ...item, quantity: Math.max(1, Math.min(quantity, item.stock || quantity)) }
+        ? { ...item, quantity: Math.max(1, Math.min(quantity, 99, Math.max(Number(item.stock ?? 0), item.quantity))) }
         : item));
 };
 

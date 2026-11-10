@@ -36,6 +36,8 @@ public record ProductRequest(
 
         Long brandId,
 
-        List<Long> categoryIds
+        List<Long> categoryIds,
+
+        Boolean testProduct
 ) {
 }

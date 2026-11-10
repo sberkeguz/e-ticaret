@@ -16,6 +16,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -45,9 +48,16 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 // Token (JWT) kullandığımız ve session tutmadığımız için CSRF kapalı
                 .csrf(csrf -> csrf.disable())
+                // 3D Secure dönüş sayfası, ödeme ekranındaki iframe içinde açılır; yalnızca ona
+                // çerçeve izni veriyoruz, diğer tüm yanıtlar X-Frame-Options: DENY ile kalır.
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.disable())
+                        .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                                notPaymentCallback(),
+                                new XFrameOptionsHeaderWriter(XFrameOptionsHeaderWriter.XFrameOptionsMode.DENY))))
                 .authorizeHttpRequests(auth -> auth
                         // Login, register ve hata sayfası herkese açık
-                        .requestMatchers("/api/auth/**", "/api/user/**", "/error").permitAll()
+                        .requestMatchers("/api/auth/**", "/api/user/**", "/api/payments/callback", "/error").permitAll()
                         // Admin endpoint'leri sadece ADMIN rolüne açık
                         // (User.getAuthorities içinde "ROLE_" + role.name() olmalı)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
@@ -62,6 +72,10 @@ public class SecurityConfig {
         return http.build();
     }
 
+    private static RequestMatcher notPaymentCallback() {
+        return request -> !"/api/payments/callback".equals(request.getRequestURI());
+    }
+
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
@@ -74,8 +88,16 @@ public class SecurityConfig {
         // ÖNEMLİ: Tarayıcının JS'e "Authorization" response header'ını göstermesine izin verir.
         // Bunu yazmazsak React res.headers.get("Authorization") ile token'ı okuyamaz.
         configuration.setExposedHeaders(List.of("Authorization"));
-
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        CorsConfiguration paymentCallbackConfiguration = new CorsConfiguration();
+        // 3D Secure dönüşü bankanın/iyzico'nun sayfasından gelen bir form POST'udur; kaynağı
+        // bankaya göre değişir. Uç nokta kimlik bilgisi kullanmaz, sonucu iyzico'dan imzalı
+        // olarak doğrular; bu yüzden her kaynağa açık.
+        paymentCallbackConfiguration.setAllowedOriginPatterns(List.of("*"));
+        paymentCallbackConfiguration.setAllowCredentials(false);
+        paymentCallbackConfiguration.setAllowedMethods(List.of("POST"));
+        paymentCallbackConfiguration.setAllowedHeaders(List.of("*"));
+        source.registerCorsConfiguration("/api/payments/callback", paymentCallbackConfiguration);
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }

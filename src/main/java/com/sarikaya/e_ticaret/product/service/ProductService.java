@@ -2,13 +2,12 @@ package com.sarikaya.e_ticaret.product.service;
 
 import com.sarikaya.e_ticaret.brand.repository.BrandRepository;
 import com.sarikaya.e_ticaret.category.repository.CategoryRepository;
+import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.product.dto.ProductRequest;
 import com.sarikaya.e_ticaret.product.dto.ProductResponse;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,15 +26,28 @@ public class ProductService {
         this.brandRepository = brandRepository;
     }
 
-    public List<ProductResponse> listActive() {
-        return productRepository.findAllByActiveTrue()
-                .stream()
+    public List<ProductResponse> listActive(boolean includeTestProducts) {
+        List<Product> products;
+        if (includeTestProducts) {
+            products = productRepository.findAllByActiveTrue();
+        } else {
+            products = productRepository.findAllByActiveTrueAndTestProductFalse();
+        }
+
+        return products.stream()
                 .map(ProductResponse::from)
                 .toList();
     }
 
-    public ProductResponse getActive(Long id) {
-        return ProductResponse.from(findActive(id));
+    public ProductResponse getActive(Long id, boolean includeTestProducts) {
+        Product product = findActive(id);
+
+        boolean hiddenFromThisUser = product.isTestProduct() && !includeTestProducts;
+        if (hiddenFromThisUser) {
+            throw new ResourceNotFoundException("Ürün bulunamadı.");
+        }
+
+        return ProductResponse.from(product);
     }
 
     public ProductResponse create(ProductRequest request) {
@@ -58,8 +70,7 @@ public class ProductService {
 
     private Product findActive(Long id) {
         return productRepository.findByIdAndActiveTrue(id)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND, "Ürün bulunamadı"));
+                .orElseThrow(() -> new ResourceNotFoundException("Ürün bulunamadı."));
     }
 
     private void copyRequest(ProductRequest request, Product product) {
@@ -75,5 +86,9 @@ public class ProductService {
         product.setCategories(request.categoryIds() == null
                 ? new LinkedHashSet<>()
                 : new LinkedHashSet<>(categoryRepository.findAllById(request.categoryIds())));
+
+        if (request.testProduct() != null) {
+            product.setTestProduct(request.testProduct());
+        }
     }
 }

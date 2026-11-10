@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
 import StoreHeader from "../components/StoreHeader";
+import { moveFavorites } from "../favorites";
 
 const ADDRESS_API = "https://api.turkiyeapi.dev/v1";
 const loadList = async (path) => {
@@ -166,7 +167,13 @@ export default function Profile() {
             const data = await response.json();
             const authorization = response.headers.get("Authorization");
             if (authorization?.startsWith("Bearer ")) localStorage.setItem("token", authorization.slice(7));
+            const previousUsername = localStorage.getItem("username");
             localStorage.setItem("username", data.username);
+            try {
+                moveFavorites(previousUsername, data.username);
+            } catch {
+                setError("Kullanıcı adınız değişti ancak favorileriniz taşınamadı. Tarayıcı depolama ayarlarınızı kontrol edin.");
+            }
             window.dispatchEvent(new Event("username-changed"));
             setProfile((current) => ({ ...current, username: data.username }));
             setSaved(true);

@@ -64,10 +64,23 @@ export default function AdminProducts() {
                 <Link className="button button-primary" to="/admin/products/new">+ Yeni ürün</Link>
             </div>
 
-            <section className="stat-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-                <article className="surface stat-card"><span className="stat-icon">▦</span><span><span className="stat-value">{products.length}</span><span className="stat-label">Toplam ürün</span></span></article>
-                <article className="surface stat-card"><span className="stat-icon" style={{ color: "var(--green)", background: "var(--mint)" }}>✓</span><span><span className="stat-value">{inStockCount}</span><span className="stat-label">Stokta bulunan</span></span></article>
-                <article className="surface stat-card"><span className="stat-icon" style={{ color: "var(--amber)", background: "#fff4e3" }}>!</span><span><span className="stat-value">{outOfStockCount}</span><span className="stat-label">Stokta olmayan</span></span></article>
+            <section className="stat-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }} aria-label="Stok filtresi">
+                {[
+                    { key: "all", value: products.length, label: "Toplam ürün", icon: "▦", iconStyle: undefined },
+                    { key: "in", value: inStockCount, label: "Stokta bulunan", icon: "✓", iconStyle: { color: "var(--green)", background: "var(--mint)" } },
+                    { key: "out", value: outOfStockCount, label: "Stokta olmayan", icon: "!", iconStyle: { color: "var(--amber)", background: "#fff4e3" } },
+                ].map((card) => (
+                    <button
+                        key={card.key}
+                        type="button"
+                        className={`surface stat-card stat-filter${stockFilter === card.key ? " active" : ""}`}
+                        aria-pressed={stockFilter === card.key}
+                        onClick={() => setStockFilter(card.key)}
+                    >
+                        <span className="stat-icon" style={card.iconStyle}>{card.icon}</span>
+                        <span><span className="stat-value">{card.value}</span><span className="stat-label">{card.label}</span></span>
+                    </button>
+                ))}
             </section>
 
             <section className="surface surface-pad">
@@ -110,7 +123,7 @@ export default function AdminProducts() {
                                                     <span className="product-thumb">
                                                         {product.imageUrl ? <img src={product.imageUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : "▦"}
                                                     </span>
-                                                    <span><span className="cell-primary">{product.name}</span><span className="cell-sub">{product.brandName || "Markasız"} · #{product.id}</span></span>
+                                                    <span><span className="cell-primary">{product.name}{product.testProduct && <span className="badge badge-amber test-badge">Test</span>}</span><span className="cell-sub">{product.brandName || "Markasız"} · #{product.id}</span></span>
                                                 </div>
                                             </td>
                                             <td>{(product.categoryNames || []).join(", ") || product.categoryName || "—"}</td>
