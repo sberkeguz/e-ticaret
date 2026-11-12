@@ -94,6 +94,7 @@ export default function MyOrders() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const paymentResult = searchParams.get("payment");
+    const paymentReason = searchParams.get("reason");
     const [cancellingId, setCancellingId] = useState(null);
     const [openDetails, setOpenDetails] = useState(() => new Set());
     const toggleDetails = (id) => setOpenDetails((current) => {
@@ -152,7 +153,7 @@ export default function MyOrders() {
                 {paymentResult === "success" && <p className="success-banner" role="status">Ödemeniz onaylandı, siparişiniz hazırlanıyor.</p>}
                 {paymentResult === "review" && <p className="error-banner" role="status">Ödemeniz alındı ve kontrol ediliyor.</p>}
                 {paymentResult === "failed" && <p className="error-banner" role="status">Ödeme tamamlanmadı. Sipariş iptal edildi ve stok serbest bırakıldı.</p>}
-                {paymentResult === "declined" && <p className="error-banner" role="status">Ödeme tamamlanmadı, kartınızdan para çekilmedi. Siparişi aşağıdan tekrar ödeyebilir veya iptal edebilirsiniz.</p>}
+                {paymentResult === "declined" && <p className="error-banner" role="status">{paymentReason ? `${paymentReason}. ` : ""}Ödeme tamamlanmadı, kartınızdan para çekilmedi. Siparişi aşağıdan tekrar ödeyebilir veya iptal edebilirsiniz.</p>}
                 {paymentResult === "error" && <p className="error-banner" role="status">Ödeme sonucu doğrulanamadı. Siparişinizin durumunu aşağıdan kontrol edin; sorun sürerse bizimle iletişime geçin.</p>}
                 {paymentResult === "cancelled" && <p className="success-banner" role="status">Sipariş iptal edildi, ayrılan stok serbest bırakıldı.</p>}
                 {error && <p className="error-banner" role="alert">{error}</p>}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
+import PaymentAlertsCard from "../components/PaymentAlertsCard";
 
 const cards = [
     { to: "/admin/products", icon: "▦", title: "Ürün kataloğu", description: "Ürünleri listeleyin, stok ve fiyat bilgilerini yönetin." },
@@ -108,6 +109,8 @@ export default function AdminPanel() {
                     </ul>
                 )}
             </section>
+
+            <PaymentAlertsCard />
 
             <div className="page-heading" style={{ marginTop: 32, marginBottom: 16 }}>
                 <div>

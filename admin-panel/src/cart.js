@@ -101,10 +101,53 @@ export const syncCart = async () => {
         items = fromServer(await saveResponse.json());
     }
 
+    const alreadySynced = localStorage.getItem(SYNCED_USER_KEY) === username;
+    const notices = alreadySynced ? await explainServerChanges(localItems, items) : [];
+
     localStorage.setItem(SYNCED_USER_KEY, username);
     localStorage.setItem(KEY, JSON.stringify(items));
     window.dispatchEvent(new Event("cart-changed"));
+    if (notices.length) {
+        window.dispatchEvent(new CustomEvent("cart-adjusted", { detail: { messages: notices } }));
+    }
 };
+
+/**
+ * Sunucu sepeti, biri ürünü satın alıp stok düşünce kendisi küçültür. Burada yerel sepetle
+ * karşılaştırıp kullanıcıya ne olduğunu söyleriz. Tükenen ürün "Tükendi" olarak
+ * çıkarılanlar listesine eklenir. Başka sekmede satın alınan ürünler (stoğu duruyor) için uyarı yok.
+ */
+const explainServerChanges = async (before, after) => {
+    const notices = [];
+    const afterById = new Map(after.map((item) => [item.id, item]));
+    const soldOut = [];
+    for (const item of before) {
+        const now = afterById.get(item.id);
+        if (now && now.quantity < item.quantity) {
+            notices.push(`${item.name}: stokta ${now.quantity} adet kaldı, sepetiniz güncellendi.`);
+        } else if (!now) {
+            const response = await apiFetch(`/api/products/${encodeURIComponent(item.id)}`).catch(() => null);
+            const product = response?.ok ? await response.json().catch(() => null) : null;
+            const stock = Number(product?.stock ?? 0);
+            if (!product || stock <= 0) {
+                soldOut.push({ ...item, stock: 0, quantity: 1 });
+                notices.push(`${item.name} tükendi ve sepetinizden çıkarıldı.`);
+            }
+        }
+    }
+    if (soldOut.length) {
+        const soldOutIds = new Set(soldOut.map((item) => item.id));
+        saveRemoved([...soldOut, ...getRemoved().filter((item) => !soldOutIds.has(item.id))]);
+    }
+    return notices;
+};
+
+/** Başka sekme sepeti değiştirdiyse bu sekmenin ekranını da yenile. */
+window.addEventListener("storage", (event) => {
+    if (event.key === KEY || event.key === REMOVED_KEY) {
+        window.dispatchEvent(new Event("cart-changed"));
+    }
+});
 
 const REMOVED_KEY = "cart-removed";
 

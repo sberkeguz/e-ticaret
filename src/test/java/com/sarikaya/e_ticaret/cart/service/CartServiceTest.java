@@ -57,18 +57,43 @@ class CartServiceTest {
     }
 
     @Test
-    void replaceCartAllowsOutOfStockProducts() {
+    void replaceCartDropsSoldOutProducts() {
         User user = User.builder().id(1L).username("tester").build();
         when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
         Product product = new Product();
         product.setId(7L);
         product.setName("Elma");
         product.setStock(0);
-        when(cartItemRepository.findByUser_IdOrderByIdAsc(1L)).thenReturn(List.of());
+        CartItem existing = new CartItem();
+        existing.setProduct(product);
+        existing.setQuantity(1);
+        when(cartItemRepository.findByUser_IdOrderByIdAsc(1L)).thenReturn(List.of(existing));
         when(productRepository.findByIdAndActiveTrue(7L)).thenReturn(Optional.of(product));
 
         cartService.replaceCart(user, new CartRequest(List.of(new CartRequest.Item(7L, 3))));
-        verify(cartItemRepository).save(any(CartItem.class));
+
+        verify(cartItemRepository, org.mockito.Mockito.never()).save(any(CartItem.class));
+        verify(cartItemRepository).deleteAll(org.mockito.ArgumentMatchers.<Iterable<CartItem>>argThat(items -> {
+            List<CartItem> deleted = new ArrayList<>();
+            items.forEach(deleted::add);
+            return deleted.equals(List.of(existing));
+        }));
+    }
+
+    @Test
+    void replaceCartCapsQuantityToStock() {
+        User user = User.builder().id(1L).username("tester").build();
+        when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
+        Product product = new Product();
+        product.setId(7L);
+        product.setName("Elma");
+        product.setStock(2);
+        when(cartItemRepository.findByUser_IdOrderByIdAsc(1L)).thenReturn(List.of());
+        when(productRepository.findByIdAndActiveTrue(7L)).thenReturn(Optional.of(product));
+
+        cartService.replaceCart(user, new CartRequest(List.of(new CartRequest.Item(7L, 5))));
+
+        verify(cartItemRepository).save(org.mockito.ArgumentMatchers.argThat(item -> item.getQuantity() == 2));
     }
 
     @Test

@@ -1,7 +1,5 @@
 package com.sarikaya.e_ticaret.payment.service;
 
-import com.iyzipay.model.ThreedsInitialize;
-import com.iyzipay.model.ThreedsPayment;
 import com.sarikaya.e_ticaret.cart.entity.CartItem;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
@@ -9,6 +7,7 @@ import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutRequest;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
@@ -18,16 +17,16 @@ import com.sarikaya.e_ticaret.product.repository.ProductRepository;
 import com.sarikaya.e_ticaret.user.entity.User;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class PaymentServiceTest {
@@ -36,10 +35,14 @@ class PaymentServiceTest {
     private final ProductRepository products = mock(ProductRepository.class);
     private final UserRepository users = mock(UserRepository.class);
     private final CartItemRepository cartItems = mock(CartItemRepository.class);
+    private final IyzicoServiceClient iyzicoService = mock(IyzicoServiceClient.class);
+    private final PaymentService service = new PaymentService(orders, payments, products, users, cartItems, iyzicoService);
+
+    private static final String KEY = "6f1c2a8e-3b4d-4c5e-9f00-112233445566";
+    private static final UUID ATTEMPT = UUID.fromString("0b6c1f7e-1111-4222-8333-944455566677");
 
     @Test
     void checkoutWithoutThreeDSChargesCardAndMarksOrderPaid() {
-        PaymentService service = service("api-key", "secret");
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(user));
@@ -47,178 +50,195 @@ class PaymentServiceTest {
         CartItem cartItem = mockCart(user, product, 2);
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
         mockOrderSave();
+        when(iyzicoService.startPayment(eq("u7-" + KEY), any(), anyBoolean())).thenReturn(result("SUCCEEDED"));
 
-        com.iyzipay.model.Payment result = successfulPayment(com.iyzipay.model.Payment.class);
-        when(result.verifySignature("secret")).thenReturn(true);
+        var response = service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
 
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            iyzico.when(() -> com.iyzipay.model.Payment.create(any(), any())).thenReturn(result);
+        assertEquals("success", response.result());
+        assertNull(response.threeDSHtmlContent());
+        assertEquals(3, product.getStock());
+        verify(payments).save(argThat(payment -> "PAID".equals(payment.getStatus())
+                && "iyzico-payment-1".equals(payment.getToken()) && ATTEMPT.equals(payment.getAttemptId())));
+        verify(cartItems).deleteAll(List.of(cartItem));
+    }
 
-            var response = service.initialize("buyer", request(2, false), "127.0.0.1");
+    @Test
+    void cardGoesToIyzicoServiceWithBasketMatchingOrderTotal() {
+        User user = buyer();
+        when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
+        when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(user));
+        Product product = product(5, "12.50");
+        mockCart(user, product, 2);
+        when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenReturn(result("SUCCEEDED"));
 
-            assertEquals("success", response.result());
-            assertNull(response.threeDSHtmlContent());
-            assertEquals(3, product.getStock());
-            verify(payments).save(argThat(payment ->
-                    "PAID".equals(payment.getStatus()) && "iyzico-payment-1".equals(payment.getToken())));
-            verify(cartItems).deleteAll(List.of(cartItem));
-        }
+        service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
+
+        verify(iyzicoService).startPayment(eq("u7-" + KEY), argThat(body ->
+                body.orderId() == 42L
+                        && body.amount().compareTo(new BigDecimal("25.00")) == 0
+                        && body.items().getFirst().price().compareTo(new BigDecimal("25.00")) == 0
+                        && "5528790000000008".equals(body.card().number())
+                        && !body.threeDS()), eq(true));
+    }
+
+    @Test
+    void checkoutFitsOtherCartsToRemainingStock() {
+        User user = buyer();
+        when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
+        when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(user));
+        Product product = product(5, "12.50");
+        mockCart(user, product, 2);
+        when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenReturn(result("SUCCEEDED"));
+
+        service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
+
+        // Kalan stok 3: başkalarının sepetindeki fazla adet 3'e iner; alıcının sepetine dokunulmaz.
+        verify(cartItems).fitToStock(4L, 3, 7L);
     }
 
     @Test
     void declinedCardThrowsSoOrderAndStockReservationRollBack() {
-        PaymentService service = service("api-key", "secret");
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         Product product = product(5, "12.50");
         mockCart(user, product, 2);
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
         mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "FAILED", null, "Kart limiti yetersiz", "t", null));
 
-        com.iyzipay.model.Payment result = mock(com.iyzipay.model.Payment.class);
-        when(result.getStatus()).thenReturn("failure");
-        when(result.getErrorMessage()).thenReturn("Kart limiti yetersiz");
-
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            iyzico.when(() -> com.iyzipay.model.Payment.create(any(), any())).thenReturn(result);
-
-            BadRequestException error = assertThrows(BadRequestException.class,
-                    () -> service.initialize("buyer", request(2, false), "127.0.0.1"));
-            assertEquals("Ödeme alınamadı: Kart limiti yetersiz", error.getMessage());
-        }
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> service.initialize("buyer", request(2, false), "127.0.0.1", KEY));
+        assertEquals("Ödeme alınamadı: Kart limiti yetersiz", error.getMessage());
         verify(cartItems, never()).deleteAll(any());
     }
 
     @Test
+    void uncertainPaymentPutsOrderUnderReview() {
+        User user = buyer();
+        when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
+        when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(user));
+        Product product = product(5, "12.50");
+        mockCart(user, product, 2);
+        when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenReturn(result("VERIFYING"));
+
+        var response = service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
+
+        assertEquals("review", response.result());
+        verify(payments).save(argThat(payment -> "REVIEW".equals(payment.getStatus())));
+    }
+
+    @Test
     void checkoutWithThreeDSReturnsBankPageAndKeepsPaymentPending() {
-        PaymentService service = service("api-key", "secret");
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         Product product = product(5, "12.50");
         mockCart(user, product, 2);
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
         mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "AWAITING_3DS", "iyzico-payment-1", null, "t", "<html>bank</html>"));
 
-        ThreedsInitialize result = mock(ThreedsInitialize.class);
-        when(result.getStatus()).thenReturn("success");
-        when(result.getPaymentId()).thenReturn("iyzico-payment-1");
-        when(result.getHtmlContent()).thenReturn(Base64.getEncoder()
-                .encodeToString("<html>bank</html>".getBytes(StandardCharsets.UTF_8)));
+        var response = service.initialize("buyer", request(2, true), "127.0.0.1", KEY);
 
-        try (MockedStatic<ThreedsInitialize> iyzico = mockStatic(ThreedsInitialize.class)) {
-            iyzico.when(() -> ThreedsInitialize.create(any(), any())).thenReturn(result);
-
-            var response = service.initialize("buyer", request(2, true), "127.0.0.1");
-
-            assertEquals("threeds", response.result());
-            assertEquals("<html>bank</html>", response.threeDSHtmlContent());
-            assertEquals(3, product.getStock());
-            verify(payments).save(argThat(payment ->
-                    "PENDING".equals(payment.getStatus()) && "iyzico-payment-1".equals(payment.getToken())));
-        }
+        assertEquals("threeds", response.result());
+        assertEquals("<html>bank</html>", response.threeDSHtmlContent());
+        assertEquals(3, product.getStock());
+        verify(payments).save(argThat(payment -> "PENDING".equals(payment.getStatus())
+                && "iyzico-payment-1".equals(payment.getToken()) && ATTEMPT.equals(payment.getAttemptId())));
     }
 
     @Test
-    void threeDSCallbackCompletesSignedPayment() {
-        PaymentService service = service("api-key", "secret");
+    void invalidIdempotencyKeyIsRejectedBeforeAnything() {
+        assertThrows(BadRequestException.class,
+                () -> service.initialize("buyer", request(1, false), "127.0.0.1", "kisa"));
+        verifyNoInteractions(users, products, orders, payments, iyzicoService);
+    }
+
+    @Test
+    void threeDSCallbackCompletesPayment() {
         Payment payment = pendingPayment();
         Order order = payment.getOrder();
-        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(payments.findByAttemptIdForUpdate(ATTEMPT)).thenReturn(Optional.of(payment));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(order.getUser()));
         CartItem cartItem = new CartItem();
         when(cartItems.findByUser_IdOrderByIdAsc(7L)).thenReturn(List.of(cartItem));
+        when(iyzicoService.completeThreeDS(eq(ATTEMPT), any())).thenReturn(result("SUCCEEDED"));
 
-        ThreedsPayment result = successfulPayment(ThreedsPayment.class);
-        when(result.verifySignature("secret")).thenReturn(true);
+        String outcome = service.completeThreeDS(callback("success", "1"));
 
-        try (MockedStatic<ThreedsPayment> iyzico = mockStatic(ThreedsPayment.class)) {
-            iyzico.when(() -> ThreedsPayment.create(any(), any())).thenReturn(result);
+        assertEquals("success", outcome);
+        assertEquals("PAID", payment.getStatus());
+        assertEquals("Hazırlanıyor", order.getStatus());
+        verify(cartItems).deleteAll(List.of(cartItem));
 
-            String outcome = service.completeThreeDS("success", "iyzico-payment-1", "data", "42", "1");
-
-            assertEquals("success", outcome);
-            assertEquals("PAID", payment.getStatus());
-            assertEquals("Hazırlanıyor", order.getStatus());
-            verify(cartItems).deleteAll(List.of(cartItem));
-
-            assertEquals("success",
-                    service.completeThreeDS("success", "iyzico-payment-1", "data", "42", "1"));
-            iyzico.verify(() -> ThreedsPayment.create(any(), any()), times(1));
-        }
+        // İkinci dönüş IyzicoService'e hiç gitmez.
+        assertEquals("success", service.completeThreeDS(callback("success", "1")));
+        verify(iyzicoService, times(1)).completeThreeDS(any(), any());
     }
 
     @Test
-    void threeDSCallbackWithUnverifiedSignatureMovesOrderToReview() {
-        PaymentService service = service("api-key", "secret");
+    void threeDSCallbackWithUncertainResultMovesOrderToReview() {
         Payment payment = pendingPayment();
-        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(payments.findByAttemptIdForUpdate(ATTEMPT)).thenReturn(Optional.of(payment));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
+        when(iyzicoService.completeThreeDS(eq(ATTEMPT), any())).thenReturn(result("VERIFYING"));
 
-        ThreedsPayment result = successfulPayment(ThreedsPayment.class);
-        when(result.verifySignature("secret")).thenReturn(false);
-
-        try (MockedStatic<ThreedsPayment> iyzico = mockStatic(ThreedsPayment.class)) {
-            iyzico.when(() -> ThreedsPayment.create(any(), any())).thenReturn(result);
-
-            String outcome = service.completeThreeDS("success", "iyzico-payment-1", "data", "42", "1");
-
-            assertEquals("review", outcome);
-            assertEquals("REVIEW", payment.getStatus());
-        }
+        assertEquals("review", service.completeThreeDS(callback("success", "1")));
+        assertEquals("REVIEW", payment.getStatus());
         verifyNoInteractions(products);
     }
 
     @Test
     void failedBankVerificationLeavesOrderPendingWithoutCharging() {
-        PaymentService service = service("api-key", "secret");
         Payment payment = pendingPayment();
-        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(payments.findByAttemptIdForUpdate(ATTEMPT)).thenReturn(Optional.of(payment));
+        when(iyzicoService.completeThreeDS(eq(ATTEMPT), any())).thenReturn(result("FAILED"));
 
-        try (MockedStatic<ThreedsPayment> iyzico = mockStatic(ThreedsPayment.class)) {
-            String outcome = service.completeThreeDS("failure", "iyzico-payment-1", "data", "42", "0");
-
-            assertEquals("declined", outcome);
-            iyzico.verifyNoInteractions();
-        }
+        assertEquals("declined", service.completeThreeDS(callback("failure", "0")));
         assertEquals("PENDING", payment.getStatus());
         verifyNoInteractions(products);
     }
 
     @Test
-    void callbackWithForeignPaymentIdIsRejected() {
-        PaymentService service = service("api-key", "secret");
+    void callbackForExpiredOrderIsNotForwarded() {
         Payment payment = pendingPayment();
-        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        payment.setStatus("EXPIRED");
+        when(payments.findByAttemptIdForUpdate(ATTEMPT)).thenReturn(Optional.of(payment));
 
-        assertThrows(BadRequestException.class,
-                () -> service.completeThreeDS("success", "someone-else", "data", "42", "1"));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals("failed", service.completeThreeDS(callback("success", "1")));
+        verifyNoInteractions(iyzicoService);
+    }
+
+    @Test
+    void callbackWithMalformedConversationIdIsRejected() {
+        assertThrows(BadRequestException.class, () -> service.completeThreeDS(
+                new IyzicoServiceClient.ThreeDSCallback("success", "iyzico-payment-1", "data", "42", "1", null)));
+        verifyNoInteractions(iyzicoService);
     }
 
     @Test
     void payExistingOrderChargesPendingOrder() {
-        PaymentService service = service("api-key", "secret");
         Payment payment = pendingPayment();
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
+        when(iyzicoService.startPayment(eq("u7-" + KEY), any(), anyBoolean())).thenReturn(result("SUCCEEDED"));
 
-        com.iyzipay.model.Payment result = successfulPayment(com.iyzipay.model.Payment.class);
-        when(result.verifySignature("secret")).thenReturn(true);
+        var response = service.payExistingOrder("buyer", 42L,
+                new PayOrderRequest("buyer@example.com", "12345678901", false, card()), "127.0.0.1", KEY);
 
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            iyzico.when(() -> com.iyzipay.model.Payment.create(any(), any())).thenReturn(result);
-
-            var response = service.payExistingOrder("buyer", 42L,
-                    new PayOrderRequest("buyer@example.com", "12345678901", false, card()), "127.0.0.1");
-
-            assertEquals("success", response.result());
-            assertEquals("PAID", payment.getStatus());
-        }
+        assertEquals("success", response.result());
+        assertEquals("PAID", payment.getStatus());
     }
 
     @Test
     void cancelPendingOrderReleasesStock() {
-        PaymentService service = service("api-key", "secret");
         Payment payment = pendingPayment();
         Product product = product(2, "12.50");
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
@@ -233,7 +253,6 @@ class PaymentServiceTest {
 
     @Test
     void cannotCancelSomeoneElsesOrder() {
-        PaymentService service = service("api-key", "secret");
         Payment payment = pendingPayment();
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
 
@@ -244,30 +263,18 @@ class PaymentServiceTest {
 
     @Test
     void initializeRejectsInsufficientStockWithoutCallingIyzico() {
-        PaymentService service = service("api-key", "secret");
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         Product product = product(1, "12.50");
         mockCart(user, product, 2);
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
 
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            BadRequestException error = assertThrows(BadRequestException.class,
-                    () -> service.initialize("buyer", request(2, false), "127.0.0.1"));
-            assertEquals("Armut için yeterli stok yok (kalan: 1).", error.getMessage());
-            iyzico.verifyNoInteractions();
-        }
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> service.initialize("buyer", request(2, false), "127.0.0.1", KEY));
+        assertEquals("Armut için yeterli stok yok (kalan: 1).", error.getMessage());
+        verifyNoInteractions(iyzicoService);
         assertEquals(1, product.getStock());
         verifyNoInteractions(orders);
-    }
-
-    @Test
-    void initializeRequiresIyzicoCredentials() {
-        PaymentService service = service("", "");
-
-        assertThrows(BadRequestException.class,
-                () -> service.initialize("buyer", request(1, false), "127.0.0.1"));
-        verifyNoInteractions(users, products, orders, payments);
     }
 
     @Test
@@ -275,12 +282,10 @@ class PaymentServiceTest {
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         when(payments.existsByOrder_User_IdAndStatusIn(7L, List.of("PENDING"))).thenReturn(true);
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            BadRequestException error = assertThrows(BadRequestException.class,
-                    () -> service("api-key", "secret").initialize("buyer", request(1, false), "127.0.0.1"));
-            assertTrue(error.getMessage().contains("devam eden bir ödeme"));
-            iyzico.verifyNoInteractions();
-        }
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> service.initialize("buyer", request(1, false), "127.0.0.1", KEY));
+        assertTrue(error.getMessage().contains("devam eden bir ödeme"));
+        verifyNoInteractions(iyzicoService);
         verifyNoInteractions(orders, products, cartItems);
     }
 
@@ -289,24 +294,22 @@ class PaymentServiceTest {
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
         when(cartItems.findByUser_IdOrderByIdAsc(7L)).thenReturn(List.of());
-        try (MockedStatic<com.iyzipay.model.Payment> iyzico = mockStatic(com.iyzipay.model.Payment.class)) {
-            BadRequestException error = assertThrows(BadRequestException.class,
-                    () -> service("api-key", "secret").initialize("buyer", request(1, false), "127.0.0.1"));
-            assertTrue(error.getMessage().contains("Sepetiniz değişti"));
-            iyzico.verifyNoInteractions();
-        }
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> service.initialize("buyer", request(1, false), "127.0.0.1", KEY));
+        assertTrue(error.getMessage().contains("Sepetiniz değişti"));
+        verifyNoInteractions(iyzicoService);
         verifyNoInteractions(orders, products);
     }
 
     @Test
     void expireReservationsReleasesStockAndMarksOrderExpired() {
-        PaymentService service = service("api-key", "secret");
         Payment payment = pendingPayment();
         Order order = payment.getOrder();
         Product product = product(2, "12.50");
         when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
                 eq("PENDING"), any())).thenReturn(List.of(payment));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("FAILED"));
 
         assertEquals(1, service.expireReservations());
         assertEquals(4, product.getStock());
@@ -314,27 +317,118 @@ class PaymentServiceTest {
         assertEquals("Ödeme süresi doldu", order.getStatus());
     }
 
-    private PaymentService service(String apiKey, String secret) {
-        return new PaymentService(
-                orders, payments, products, users, cartItems, apiKey, secret,
-                "https://sandbox-api.iyzipay.com",
-                "https://example.test/api/payments/callback",
-                "https://example.test");
+    @Test
+    void twoDCheckoutIsAcceptedAndProcessedInBackground() {
+        User user = buyer();
+        when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
+        Product product = product(5, "12.50");
+        mockCart(user, product, 2);
+        when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), eq(true))).thenReturn(result("CREATED"));
+
+        var response = service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
+
+        assertEquals("processing", response.result());
+        assertEquals(42L, response.orderId());
+        // Sipariş beklemede kalır; sepet henüz silinmez (ödeme reddedilirse kullanıcı tekrar dener).
+        verify(payments).save(argThat(payment -> "PENDING".equals(payment.getStatus()) && ATTEMPT.equals(payment.getAttemptId())));
+        verify(cartItems, never()).deleteAll(any());
     }
 
-    private static <T extends com.iyzipay.model.PaymentResource> T successfulPayment(Class<T> type) {
-        T result = mock(type);
-        when(result.getStatus()).thenReturn("success");
-        when(result.getPaymentId()).thenReturn("iyzico-payment-1");
-        when(result.getBasketId()).thenReturn("42");
-        when(result.getConversationId()).thenReturn("42");
-        when(result.getCurrency()).thenReturn("TRY");
-        when(result.getPrice()).thenReturn(new BigDecimal("25.00"));
-        when(result.getPaidPrice()).thenReturn(new BigDecimal("25.00"));
-        // Gerçek Ödeme API yanıtı gibi: paymentStatus alanı yok.
-        when(result.getPaymentStatus()).thenReturn(null);
-        when(result.getFraudStatus()).thenReturn(1);
-        return result;
+    @Test
+    void threeDSCheckoutStaysSynchronous() {
+        User user = buyer();
+        when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
+        Product product = product(5, "12.50");
+        mockCart(user, product, 2);
+        when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        mockOrderSave();
+        when(iyzicoService.startPayment(any(), any(), eq(false))).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "AWAITING_3DS", "iyzico-payment-1", null, "t", "<html>bank</html>"));
+
+        assertEquals("threeds", service.initialize("buyer", request(2, true), "127.0.0.1", KEY).result());
+    }
+
+    @Test
+    void statusReportsDeclineWithReasonAndKeepsOrderPending() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "FAILED", null, "Kart limiti yetersiz", "t", null));
+
+        var status = service.paymentStatus("buyer", 42L);
+
+        assertEquals("declined", status.result());
+        assertEquals("Kart limiti yetersiz", status.message());
+        assertEquals("PENDING", payment.getStatus());
+    }
+
+    @Test
+    void statusCompletesOrderWhenEventIsLate() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SUCCEEDED"));
+
+        assertEquals("success", service.paymentStatus("buyer", 42L).result());
+        assertEquals("PAID", payment.getStatus());
+    }
+
+    @Test
+    void statusWhileProviderIsWorkingIsProcessing() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SENT"));
+
+        assertEquals("processing", service.paymentStatus("buyer", 42L).result());
+    }
+
+    @Test
+    void statusOfSomeoneElsesOrderIsNotFound() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+
+        assertThrows(ResourceNotFoundException.class, () -> service.paymentStatus("intruder", 42L));
+        verifyNoInteractions(iyzicoService);
+    }
+
+    @Test
+    void expiryWaitsWhileChargeIsInFlightOrServiceIsUnreachable() {
+        Payment inFlight = pendingPayment();
+        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq("PENDING"), any()))
+                .thenReturn(List.of(inFlight));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SENT"));
+
+        assertEquals(0, service.expireReservations());
+        assertEquals("PENDING", inFlight.getStatus());
+
+        when(iyzicoService.getAttempt(ATTEMPT)).thenThrow(new RuntimeException("servis kapalı"));
+        assertEquals(0, service.expireReservations());
+        assertEquals("PENDING", inFlight.getStatus());
+        verifyNoInteractions(products);
+    }
+
+    @Test
+    void expiryCompletesOrderInsteadWhenMoneyWasTaken() {
+        Payment payment = pendingPayment();
+        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq("PENDING"), any()))
+                .thenReturn(List.of(payment));
+        when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SUCCEEDED"));
+
+        assertEquals(0, service.expireReservations());
+        assertEquals("PAID", payment.getStatus());
+        verifyNoInteractions(products);
+    }
+
+    private static IyzicoServiceClient.AttemptResult result(String status) {
+        return new IyzicoServiceClient.AttemptResult(ATTEMPT, 42L, status, "iyzico-payment-1", null, "t", null);
+    }
+
+    private static IyzicoServiceClient.ThreeDSCallback callback(String status, String mdStatus) {
+        return new IyzicoServiceClient.ThreeDSCallback(status, "iyzico-payment-1", "data",
+                ATTEMPT.toString(), mdStatus, "imza");
     }
 
     private void mockOrderSave() {
@@ -403,6 +497,7 @@ class PaymentServiceTest {
         Payment payment = new Payment();
         payment.setOrder(order);
         payment.setToken("iyzico-payment-1");
+        payment.setAttemptId(ATTEMPT);
         payment.setStatus("PENDING");
         return payment;
     }

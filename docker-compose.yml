@@ -15,6 +15,51 @@
         timeout: 5s
         retries: 10
 
+    # Servisler arası mesajlaşma. Yönetim arayüzü: http://localhost:15672 (DLQ'lar burada görünür)
+    rabbitmq:
+      image: rabbitmq:4-management-alpine
+      environment:
+        RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-eticaret}
+        RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}
+      ports:
+        - "127.0.0.1:5672:5672"
+        - "127.0.0.1:15672:15672"
+      volumes:
+        - rabbitmq_data:/var/lib/rabbitmq
+      healthcheck:
+        test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+        interval: 5s
+        timeout: 10s
+        retries: 20
+
+    # iyzico ile konuşan tek servis (NestJS + Prisma). Aynı Postgres, kendi şeması (iyzico).
+    iyzico-service:
+      build:
+        context: ./services/iyzico-service
+        dockerfile: Dockerfile
+      environment:
+        DATABASE_URL: postgresql://eticaret_user:${POSTGRES_PASSWORD:-eticaret_dev_password}@postgres:5432/eticaret?schema=iyzico
+        RABBITMQ_URL: amqp://${RABBITMQ_USER:-eticaret}:${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}@rabbitmq:5672
+        INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
+        IYZIPAY_API_KEY: ${IYZIPAY_API_KEY:-}
+        IYZIPAY_SECRET_KEY: ${IYZIPAY_SECRET_KEY:-}
+        IYZIPAY_BASE_URL: ${IYZIPAY_BASE_URL:-https://sandbox-api.iyzipay.com}
+        # 3D dönüşü tarayıcıdan backend'e gelir (ngrok), backend bu servise iletir.
+        IYZIPAY_CALLBACK_URL: ${IYZIPAY_CALLBACK_URL:-http://localhost:8080/api/payments/callback}
+      ports:
+        # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, Swagger UI).
+        - "127.0.0.1:8081:8081"
+      depends_on:
+        postgres:
+          condition: service_healthy
+        rabbitmq:
+          condition: service_healthy
+      healthcheck:
+        test: [ "CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1" ]
+        interval: 5s
+        timeout: 5s
+        retries: 20
+
     backend:
       build:
         context: .
@@ -24,15 +69,20 @@
         SPRING_DATASOURCE_USERNAME: eticaret_user
         SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-eticaret_dev_password}
         JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
-        IYZIPAY_API_KEY: ${IYZIPAY_API_KEY:-}
-        IYZIPAY_SECRET_KEY: ${IYZIPAY_SECRET_KEY:-}
-        IYZIPAY_BASE_URL: ${IYZIPAY_BASE_URL:-https://sandbox-api.iyzipay.com}
-        IYZIPAY_CALLBACK_URL: ${IYZIPAY_CALLBACK_URL:-http://localhost:8080/api/payments/callback}
+        IYZICO_SERVICE_URL: http://iyzico-service:8081
+        RABBITMQ_HOST: rabbitmq
+        RABBITMQ_USER: ${RABBITMQ_USER:-eticaret}
+        RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}
+        INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
         APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
       ports:
         - "8080:8080"
       depends_on:
         postgres:
+          condition: service_healthy
+        iyzico-service:
+          condition: service_healthy
+        rabbitmq:
           condition: service_healthy
 
     frontend:
@@ -46,3 +96,4 @@
 
   volumes:
     postgres_data:
+    rabbitmq_data:

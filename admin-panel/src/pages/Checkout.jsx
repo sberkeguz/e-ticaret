@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { getCart, syncCart } from "../cart";
 import StoreHeader from "../components/StoreHeader";
+import useLiveCart from "../useLiveCart";
+import { CartNotice } from "./Cart";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const ADDRESS_API = "https://api.turkiyeapi.dev/v1";
@@ -25,6 +27,8 @@ const luhnValid = (number) => {
     }
     return number.length >= 15 && sum % 10 === 0;
 };
+const PROCESSING_CHECK_MS = 1500;
+const PROCESSING_MAX_CHECKS = 60; // ~90 sn; sonrasında Siparişlerim'e yönlendirilir
 const PAYMENT_RESULTS = ["success", "failed", "review", "pending", "declined", "error"];
 
 const blankForm = {
@@ -44,8 +48,15 @@ export default function Checkout() {
     const [error, setError] = useState("");
     const [saving, setSaving] = useState(false);
     const [threeDSHtml, setThreeDSHtml] = useState("");
+    // 2D ödeme kabul edildi, sonucu bekleniyor: bu siparişin durumunu soruyoruz.
+    const [processingOrderId, setProcessingOrderId] = useState(null);
     const [card, setCard] = useState(blankCard);
     const threeDSFrame = useRef(null);
+    // Her ödeme denemesinin anahtarı. Cevap gelmeden bağlantı koparsa tekrar gönderimde aynı anahtar
+    // gider; sunucu bunu aynı deneme sayar ve kartı ikinci kez çekmez. Cevap gelince yeni anahtar üretilir.
+    const paymentKey = useRef(crypto.randomUUID());
+    // Ödeme sürerken sepet yenilenmez; diğer zamanlarda başka biri ürünü bitirirse anında görülür.
+    const [cartNotice, clearCartNotice] = useLiveCart(!payOrderId && !saving && !threeDSHtml && !processingOrderId);
     const [forceThreeDS, setForceThreeDS] = useState(false);
     const [provinces, setProvinces] = useState([]);
     const [districts, setDistricts] = useState([]);
@@ -181,7 +192,7 @@ export default function Checkout() {
 
     const submit = async (event) => {
         event.preventDefault();
-        if (saving || threeDSHtml) return;
+        if (saving || threeDSHtml || processingOrderId) return;
         setError("");
         if (stockLoading || stockError) return setError(stockError || "Sepet stokları doğrulanamadı. Lütfen tekrar deneyin.");
         if (unavailable.length) return setError("Sepetinizde yeterli stoğu olmayan ürünler var. Sipariş vermek için sepetinizi düzenleyin.");
@@ -221,13 +232,26 @@ export default function Checkout() {
 
         setSaving(true);
         try {
-            const response = await apiFetch(payOrderId ? `/api/payments/orders/${encodeURIComponent(payOrderId)}/pay` : "/api/payments/checkout", {
-                method: "POST",
-                body: JSON.stringify(body),
-            });
+            let response;
+            try {
+                response = await apiFetch(payOrderId ? `/api/payments/orders/${encodeURIComponent(payOrderId)}/pay` : "/api/payments/checkout", {
+                    method: "POST",
+                    headers: { "Idempotency-Key": paymentKey.current },
+                    body: JSON.stringify(body),
+                });
+            } catch {
+                // Cevap gelmedi: ödeme alınmış olabilir. Anahtar aynı kalır, tekrar denemek güvenli.
+                throw new Error("Bağlantı kesildi. Siparişlerim sayfasını kontrol edin veya aynı bilgilerle tekrar deneyin.");
+            }
+            paymentKey.current = crypto.randomUUID();
             const result = await response.json().catch(() => null);
             if (!response.ok) throw new Error(result?.message || "Ödeme alınamadı.");
             setCard((current) => ({ ...current, number: "", cvc: "" }));
+            if (result?.result === "processing" && result.orderId) {
+                setProcessingOrderId(result.orderId);
+                setSaving(false);
+                return;
+            }
             if (result?.result === "threeds" && result.threeDSHtmlContent) {
                 setThreeDSHtml(result.threeDSHtmlContent);
                 setSaving(false);
@@ -272,7 +296,37 @@ export default function Checkout() {
     const header = (
         <StoreHeader syncCartOnMount={false} />
     );
-    const locked = saving || Boolean(threeDSHtml);
+    // "Ödemeniz işleniyor…": sonuç gelene kadar sunucuya sorar (genelde birkaç saniye).
+    useEffect(() => {
+        if (!processingOrderId) return undefined;
+        let active = true;
+        let tries = 0;
+        const check = async () => {
+            tries += 1;
+            try {
+                const response = await apiFetch(`/api/payments/orders/${encodeURIComponent(processingOrderId)}/status`);
+                const status = response.ok ? await response.json() : null;
+                if (!active) return;
+                if (status && ["success", "review", "declined", "failed"].includes(status.result)) {
+                    const reason = status.message ? `&reason=${encodeURIComponent(status.message)}` : "";
+                    navigate(`/orders?payment=${status.result}${reason}`, { replace: true });
+                    return;
+                }
+            } catch {
+                // Bağlantı anlık koptuysa bir sonraki denemede tekrar sorarız.
+            }
+            if (!active) return;
+            if (tries >= PROCESSING_MAX_CHECKS) {
+                navigate("/orders?payment=pending", { replace: true });
+                return;
+            }
+            timer = setTimeout(check, PROCESSING_CHECK_MS);
+        };
+        let timer = setTimeout(check, PROCESSING_CHECK_MS);
+        return () => { active = false; clearTimeout(timer); };
+    }, [processingOrderId, navigate]);
+
+    const locked = saving || Boolean(threeDSHtml) || Boolean(processingOrderId);
 
     if (!payOrderId && items.length === 0) {
         return (
@@ -306,6 +360,7 @@ export default function Checkout() {
             {header}
             <main className="store-content">
                 <h1 className="page-title">{payOrderId ? "Siparişi öde" : "Satın al"}</h1>
+                {cartNotice && <CartNotice text={cartNotice} onClose={clearCartNotice} />}
                 <form className="checkout-layout" noValidate onSubmit={submit}>
                     <div className="checkout-forms">
                         <section className="surface surface-pad">
@@ -370,7 +425,15 @@ export default function Checkout() {
                         <section className="surface surface-pad">
                             <h2 className="section-title">Kart bilgileri</h2>
                             <p className="page-subtitle">Kart bilgileriniz yalnızca ödeme için iyzico'ya iletilir; bu sitede saklanmaz.</p>
-                            {threeDSHtml ? (
+                            {processingOrderId ? (
+                                <div className="processing-box" role="status" aria-live="polite">
+                                    <span className="spinner" aria-hidden="true" />
+                                    <div>
+                                        <strong>Ödemeniz işleniyor…</strong>
+                                        <p>Bankanızdan onay bekleniyor, bu genelde birkaç saniye sürer. Lütfen sayfayı kapatmayın.</p>
+                                    </div>
+                                </div>
+                            ) : threeDSHtml ? (
                                 <>
                                     <p className="section-caption">Bankanızın 3D Secure doğrulamasını tamamlayın.</p>
                                     <iframe ref={threeDSFrame} className="checkout-payment-frame" title="3D Secure doğrulama"
@@ -434,7 +497,7 @@ export default function Checkout() {
                         <p className="section-caption">Açıkken bankanızın doğrulama ekranı bu sayfada açılır.</p>
                         {error && <p className="error-banner" role="alert">{error}</p>}
                         <button className="button button-primary" type="submit" disabled={locked || stockLoading || Boolean(stockError) || unavailable.length > 0}>
-                            {saving ? "Ödeme alınıyor..." : threeDSHtml ? "Banka doğrulaması bekleniyor" : `${money(total)} öde`}
+                            {saving ? "Ödeme alınıyor..." : processingOrderId ? "Ödemeniz işleniyor…" : threeDSHtml ? "Banka doğrulaması bekleniyor" : `${money(total)} öde`}
                         </button>
                     </aside>
                 </form>

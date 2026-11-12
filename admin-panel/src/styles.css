@@ -113,6 +113,14 @@ h1, h2, h3, p { margin-top: 0; }
 .badge-gray { color: #7d879c; background: #f0f2f6; }
 .badge-amber { color: var(--amber); background: #fff4e3; }
 .error-banner { margin: 0 0 16px; padding: 12px 14px; border: 1px solid #f1d2d8; border-radius: 10px; color: #b23d51; background: #fff5f6; font-size: 12px; }
+.processing-box { display: flex; gap: 14px; align-items: center; padding: 18px; border: 1px solid #dfe3f5; border-radius: 12px; background: #f7f8fe; }
+.processing-box strong { display: block; margin-bottom: 4px; font-size: 15px; }
+.processing-box p { margin: 0; color: #5d6380; font-size: 12px; }
+.spinner { flex: none; width: 26px; height: 26px; border: 3px solid #d9ddf5; border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.notice-banner { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin: 0 0 16px; padding: 12px 14px; border: 1px solid #f3dfb4; border-radius: 10px; color: #8a5a00; background: #fff9ec; font-size: 12px; }
+.notice-banner button { border: 0; background: none; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
 .success-banner { margin: 0 0 16px; padding: 12px 14px; border: 1px solid #d5eee3; border-radius: 10px; color: #13734f; background: #f0fbf6; font-size: 12px; }
 .empty-state { padding: 48px 20px; text-align: center; }
 .empty-icon { width: 54px; height: 54px; display: grid; place-items: center; margin: 0 auto 15px; border-radius: 18px; color: var(--primary); background: var(--primary-soft); font-size: 24px; }

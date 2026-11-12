@@ -66,13 +66,19 @@ public class CartService {
                 throw new ResourceNotFoundException("Sepetteki ürün bulunamadı.");
             }
 
+            // Sepet stoktan fazlasını tutmaz: tükenen ürün sepetten çıkar, fazla adet stoğa iner.
+            int stock = product.getStock() == null ? 0 : product.getStock();
+            if (stock <= 0) {
+                continue; // existingByProduct'ta kalır ve aşağıda silinir
+            }
+
             CartItem item = existingByProduct.remove(product.getId());
             if (item == null) {
                 item = new CartItem();
                 item.setUser(user);
                 item.setProduct(product);
             }
-            item.setQuantity(requested.quantity());
+            item.setQuantity(Math.min(requested.quantity(), stock));
             cartItemRepository.save(item);
         }
 

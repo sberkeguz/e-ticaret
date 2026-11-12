@@ -1,0 +1,82 @@
+// iyzico servisinin veritabanı. Backend ile aynı Postgres, ama kendi şeması: iyzico.
+// Kart verisi hiçbir tabloda yok.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Durum makinesi: bkz. src/attempt/attempt-status.ts
+enum AttemptStatus {
+  CREATED
+  SENT
+  AWAITING_3DS
+  CONFIRM_SENT
+  SUCCEEDED
+  FAILED
+  VERIFYING
+  REFUNDED
+}
+
+/// Her ödeme denemesi bir satır.
+/// "Siparişte tek aktif deneme" ve "siparişte tek başarılı ödeme" kuralları
+/// migration'da kısmi tekil indeks olarak tanımlı (Prisma şemasında ifade edilemiyor).
+model PaymentAttempt {
+  /// iyzico'ya conversationId olarak da gider
+  id              String               @id @db.Uuid
+  orderId         BigInt               @map("order_id")
+  idempotencyKey  String               @unique(map: "uq_attempt_idempotency_key") @map("idempotency_key") @db.VarChar(100)
+  /// Aynı anahtar + farklı istek = 422
+  requestHash     String               @map("request_hash") @db.VarChar(64)
+  amount          Decimal              @db.Decimal(12, 2)
+  currency        String               @db.VarChar(3)
+  threeDS         Boolean              @map("three_ds")
+  status          AttemptStatus
+  iyzicoPaymentId String?              @unique(map: "uq_attempt_iyzico_payment_id") @map("iyzico_payment_id") @db.VarChar(50)
+  failureReason   String?              @map("failure_reason") @db.VarChar(500)
+  /// W3C trace id; loglarda bu numarayla aranır
+  traceId         String               @map("trace_id") @db.VarChar(32)
+  createdAt       DateTime             @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime             @map("updated_at") @db.Timestamptz(3)
+  events          PaymentAttemptEvent[]
+
+  @@index([orderId], map: "ix_attempt_order")
+  @@map("payment_attempts")
+}
+
+/// Durum geçmişi: her geçiş bir satır. "Bu ödeme ne yaşadı?" sorusunun cevabı.
+model PaymentAttemptEvent {
+  id         BigInt         @id @default(autoincrement())
+  attemptId  String         @map("attempt_id") @db.Uuid
+  attempt    PaymentAttempt @relation(fields: [attemptId], references: [id])
+  fromStatus AttemptStatus? @map("from_status")
+  toStatus   AttemptStatus  @map("to_status")
+  note       String?        @db.VarChar(500)
+  occurredAt DateTime       @map("occurred_at") @db.Timestamptz(3)
+
+  @@index([attemptId], map: "ix_attempt_event_attempt")
+  @@map("payment_attempt_events")
+}
+
+/// Outbox: gönderilecek olaylar. Durum değişikliğiyle AYNI işlemde yazılır;
+/// OutboxRelay bunları RabbitMQ'ya iletir ve published_at'i doldurur.
+model OutboxMessage {
+  /// RabbitMQ messageId'si; dinleyiciler tekrar gelen mesajı bununla tanır
+  id          String    @id @db.Uuid
+  exchange    String    @db.VarChar(100)
+  routingKey  String    @map("routing_key") @db.VarChar(100)
+  type        String    @db.VarChar(100)
+  payload     Json
+  createdAt   DateTime  @map("created_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error") @db.VarChar(500)
+
+  @@map("outbox_messages")
+}

@@ -1,8 +1,10 @@
 package com.sarikaya.e_ticaret.payment.controller;
 
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutRequest;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
+import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -38,18 +40,27 @@ public class PaymentController {
     @PostMapping("/checkout")
     public CheckoutResponse checkout(
             Authentication auth,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CheckoutRequest request,
             HttpServletRequest servletRequest) {
-        return paymentService.initialize(auth.getName(), request, servletRequest.getRemoteAddr());
+        return paymentService.initialize(auth.getName(), request, servletRequest.getRemoteAddr(), idempotencyKey);
     }
 
     @PostMapping("/orders/{orderId}/pay")
     public CheckoutResponse payOrder(
             Authentication auth,
             @PathVariable Long orderId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PayOrderRequest request,
             HttpServletRequest servletRequest) {
-        return paymentService.payExistingOrder(auth.getName(), orderId, request, servletRequest.getRemoteAddr());
+        return paymentService.payExistingOrder(auth.getName(), orderId, request, servletRequest.getRemoteAddr(),
+                idempotencyKey);
+    }
+
+    /** "Ödemeniz işleniyor..." ekranı sonucu buradan sorar. */
+    @GetMapping("/orders/{orderId}/status")
+    public PaymentStatusResponse status(Authentication auth, @PathVariable Long orderId) {
+        return paymentService.paymentStatus(auth.getName(), orderId);
     }
 
     @PostMapping("/orders/{orderId}/cancel")
@@ -71,10 +82,12 @@ public class PaymentController {
             @RequestParam(required = false) String conversationData,
             @RequestParam(required = false) String conversationId,
             @RequestParam(required = false) String mdStatus,
+            @RequestParam(required = false) String signature,
             HttpServletResponse response) throws IOException {
         String result;
         try {
-            result = paymentService.completeThreeDS(status, paymentId, conversationData, conversationId, mdStatus);
+            result = paymentService.completeThreeDS(new IyzicoServiceClient.ThreeDSCallback(
+                    status, paymentId, conversationData, conversationId, mdStatus, signature));
         } catch (RuntimeException e) {
             log.warn("3D Secure dönüşü işlenemedi: {}", e.getMessage());
             result = "error";

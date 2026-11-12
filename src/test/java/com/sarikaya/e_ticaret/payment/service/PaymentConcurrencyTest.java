@@ -5,6 +5,7 @@ import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.order.dto.OrderRequest;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutRequest;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
@@ -13,9 +14,9 @@ import com.sarikaya.e_ticaret.user.entity.Role;
 import com.sarikaya.e_ticaret.user.entity.User;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -28,16 +29,19 @@ import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = {"iyzico.api-key=test", "iyzico.secret-key=test"})
+@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
 class PaymentConcurrencyTest {
+    private static final String KEY = "6f1c2a8e-3b4d-4c5e-9f00-112233445566";
     @Autowired private PaymentService service;
     @Autowired private UserRepository users;
     @Autowired private ProductRepository products;
     @Autowired private CartItemRepository cartItems;
     @Autowired private OrderRepository orders;
     @Autowired private PaymentRepository payments;
+    @MockitoBean private IyzicoServiceClient iyzicoService;
 
     @Test
     void simultaneousCheckoutsCreateOnlyOnePayment() throws Exception {
@@ -63,26 +67,18 @@ class PaymentConcurrencyTest {
         CountDownLatch secondStarted = new CountDownLatch(1);
 
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> {
-                try (MockedStatic<com.iyzipay.model.Payment> provider = mockStatic(com.iyzipay.model.Payment.class)) {
-                    com.iyzipay.model.Payment result = mock(com.iyzipay.model.Payment.class);
-                    when(result.getStatus()).thenReturn("success");
-                    when(result.getPaymentId()).thenReturn("test-" + UUID.randomUUID());
-                    when(result.getPaymentStatus()).thenReturn("SUCCESS");
-                    when(result.getFraudStatus()).thenReturn(1);
-                    provider.when(() -> com.iyzipay.model.Payment.create(any(), any())).thenAnswer(invocation -> {
-                        providerStarted.countDown();
-                        if (!releaseProvider.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("Provider timeout");
-                        return result;
-                    });
-                    return service.initialize(user.getUsername(), request, "127.0.0.1");
-                }
+            when(iyzicoService.startPayment(any(), any(), anyBoolean())).thenAnswer(invocation -> {
+                providerStarted.countDown();
+                if (!releaseProvider.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("Provider timeout");
+                return new IyzicoServiceClient.AttemptResult(UUID.randomUUID(), null, "SUCCEEDED",
+                        "test-" + UUID.randomUUID(), null, "t", null);
             });
+            var first = executor.submit(() -> service.initialize(user.getUsername(), request, "127.0.0.1", KEY));
             try {
                 assertTrue(providerStarted.await(10, TimeUnit.SECONDS));
                 var second = executor.submit(() -> {
                     secondStarted.countDown();
-                    return service.initialize(user.getUsername(), request, "127.0.0.1");
+                    return service.initialize(user.getUsername(), request, "127.0.0.1", KEY);
                 });
                 assertTrue(secondStarted.await(5, TimeUnit.SECONDS));
                 assertThrows(TimeoutException.class, () -> second.get(300, TimeUnit.MILLISECONDS));

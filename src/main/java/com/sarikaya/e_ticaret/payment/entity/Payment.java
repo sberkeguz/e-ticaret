@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "payments")
@@ -22,8 +23,13 @@ public class Payment {
     @JoinColumn(name = "order_id", nullable = false, unique = true)
     private Order order;
 
+    /** iyzico ödeme numarası. */
     @Column(unique = true)
     private String token;
+
+    /** IyzicoService'teki son ödeme denemesinin numarası (iyzico'ya conversationId olarak gider). */
+    @Column(unique = true)
+    private UUID attemptId;
 
     @Column(nullable = false, length = 30)
     private String status = "PENDING";

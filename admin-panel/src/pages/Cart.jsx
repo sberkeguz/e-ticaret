@@ -6,6 +6,7 @@ import FavoriteButton from "../components/FavoriteButton";
 import StoreProduct from "../components/StoreProduct";
 import { apiFetch } from "../api";
 import useFavorites from "../useFavorites";
+import useLiveCart from "../useLiveCart";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
@@ -14,6 +15,7 @@ export default function Cart() {
     const [items, setItems] = useState(getCart);
     const [removed, setRemoved] = useState(getRemoved);
     const { ids: favoriteIds } = useFavorites();
+    const [cartNotice, clearCartNotice] = useLiveCart();
     const [products, setProducts] = useState([]);
     const [productsError, setProductsError] = useState("");
 
@@ -48,6 +50,7 @@ export default function Cart() {
             <StoreHeader />
             <main className="store-content">
                 <h1 className="page-title">Sepetim</h1>
+                {cartNotice && <CartNotice text={cartNotice} onClose={clearCartNotice} />}
                 {items.length === 0 ? (
                     <div className="surface empty-state">
                         <h3>Sepetiniz boş</h3>
@@ -106,5 +109,14 @@ export default function Cart() {
                 )}
             </main>
         </div>
+    );
+}
+
+export function CartNotice({ text, onClose }) {
+    return (
+        <p className="notice-banner" role="status">
+            <span>{text}</span>
+            <button type="button" aria-label="Uyarıyı kapat" onClick={onClose}>×</button>
+        </p>
     );
 }

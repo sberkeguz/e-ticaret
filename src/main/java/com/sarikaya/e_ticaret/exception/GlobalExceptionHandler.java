@@ -9,6 +9,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -71,6 +72,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleMissingParameter(MissingServletRequestParameterException e) {
         return build(HttpStatus.BAD_REQUEST, "MISSING_PARAMETER",
                 "Zorunlu istek parametresi eksik: " + e.getParameterName() + ".");
+    }
+
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ApiError> handleMissingHeader(MissingRequestHeaderException e) {
+        return build(HttpStatus.BAD_REQUEST, "MISSING_HEADER",
+                "Zorunlu istek başlığı eksik: " + e.getHeaderName() + ".");
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)

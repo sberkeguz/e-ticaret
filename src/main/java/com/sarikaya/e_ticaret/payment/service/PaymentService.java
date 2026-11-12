@@ -1,32 +1,18 @@
 package com.sarikaya.e_ticaret.payment.service;
 
-import com.iyzipay.Options;
-import com.iyzipay.exception.HttpClientException;
-import com.iyzipay.model.Address;
-import com.iyzipay.model.BasketItem;
-import com.iyzipay.model.BasketItemType;
-import com.iyzipay.model.Buyer;
-import com.iyzipay.model.Currency;
-import com.iyzipay.model.Locale;
-import com.iyzipay.model.PaymentCard;
-import com.iyzipay.model.PaymentChannel;
-import com.iyzipay.model.PaymentGroup;
-import com.iyzipay.model.PaymentResource;
-import com.iyzipay.model.Refund;
-import com.iyzipay.model.ThreedsInitialize;
-import com.iyzipay.model.ThreedsPayment;
-import com.iyzipay.request.CreatePaymentRequest;
-import com.iyzipay.request.CreateRefundV2Request;
-import com.iyzipay.request.CreateThreedsPaymentRequest;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient;
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient.AttemptResult;
+import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient.StartPayment;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutRequest;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
+import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
@@ -35,25 +21,25 @@ import com.sarikaya.e_ticaret.user.entity.User;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.net.ssl.SSLHandshakeException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
-import java.util.function.Supplier;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
- * Ödemeler iyzico Ödeme API'si ile alınır. Kart bilgileri sayfadaki formdan gelir,
- * yalnızca iyzico'ya iletilir; veritabanına yazılmaz ve loglanmaz.
+ * Sipariş, stok ve sepet tarafı. Kartla ödeme IyzicoService'e devredilir:
+ * kart bilgisi oraya senkron HTTP ile gider, burada yazılmaz ve loglanmaz.
+ *
+ * Ödeme sırasında backend kendi ödeme satırını kilitli tutar; böylece aynı siparişe
+ * gelen ikinci istek, iptal veya süre dolumu ilk ödeme bitene kadar bekler.
  */
 @Service
 public class PaymentService {
@@ -65,17 +51,16 @@ public class PaymentService {
     private static final String REFUNDED = "REFUNDED";
     private static final String ORDER_CANCELLED = "İptal edildi";
     private static final int RESERVATION_MINUTES = 2;
+    /** Para çekme isteğinin iyzico'da sürdüğü ya da sonucunun belirsiz olduğu durumlar. */
+    private static final Set<String> IN_FLIGHT_AT_PROVIDER = Set.of("CREATED", "SENT", "CONFIRM_SENT", "VERIFYING");
+    private static final Pattern CLIENT_KEY = Pattern.compile("[A-Za-z0-9-]{8,64}");
 
     private final OrderRepository orders;
     private final PaymentRepository payments;
     private final ProductRepository products;
     private final UserRepository users;
     private final CartItemRepository cartItems;
-    private final String apiKey;
-    private final String secretKey;
-    private final String baseUrl;
-    private final String callbackUrl;
-    private final String frontendUrl;
+    private final IyzicoServiceClient iyzicoService;
 
     public PaymentService(
             OrderRepository orders,
@@ -83,28 +68,19 @@ public class PaymentService {
             ProductRepository products,
             UserRepository users,
             CartItemRepository cartItems,
-            @Value("${iyzico.api-key:}") String apiKey,
-            @Value("${iyzico.secret-key:}") String secretKey,
-            @Value("${iyzico.base-url:https://sandbox-api.iyzipay.com}") String baseUrl,
-            @Value("${iyzico.callback-url:http://localhost:8080/api/payments/callback}") String callbackUrl,
-            @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
+            IyzicoServiceClient iyzicoService) {
         this.orders = orders;
         this.payments = payments;
         this.products = products;
         this.users = users;
         this.cartItems = cartItems;
-        this.apiKey = apiKey;
-        this.secretKey = secretKey;
-        this.baseUrl = baseUrl;
-        this.callbackUrl = callbackUrl;
-        this.frontendUrl = frontendUrl;
+        this.iyzicoService = iyzicoService;
     }
 
     /** Sepetten yeni sipariş oluşturur, stoğu ayırır ve kartla ödemeyi başlatır. */
     @Transactional
-    public CheckoutResponse initialize(String username, CheckoutRequest request, String ip) {
-        requireCredentials();
-
+    public CheckoutResponse initialize(String username, CheckoutRequest request, String ip, String idempotencyKey) {
+        requireValidKey(idempotencyKey);
         User user = users.findByUsernameForUpdate(username)
                 .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
 
@@ -151,6 +127,9 @@ public class PaymentService {
             }
 
             product.setStock(stock - quantity);
+            // Ürün başka sepetlerde kalan stoktan fazla duruyorsa oradan çıkar/azalt.
+            // Ödeme reddedilirse bu da işlemle birlikte geri alınır.
+            cartItems.fitToStock(product.getId(), product.getStock(), user.getId());
             total = total.add(product.getPrice().multiply(BigDecimal.valueOf(quantity)));
 
             OrderItem orderItem = new OrderItem();
@@ -174,17 +153,19 @@ public class PaymentService {
         payments.saveAndFlush(payment);
 
         // Ödeme reddedilirse hata fırlatılır ve sipariş, stok ayırma dahil geri alınır.
-        return charge(payment, order, request.email(), request.identityNumber(),
-                request.card(), request.forceThreeDS(), ip);
+        return charge(payment, order, user, request.email(), request.identityNumber(),
+                request.card(), request.forceThreeDS(), ip, idempotencyKey);
     }
 
     /** Siparişlerim'den, ödemesi bekleyen siparişi kartla öder. */
     @Transactional
-    public CheckoutResponse payExistingOrder(String username, Long orderId, PayOrderRequest request, String ip) {
-        requireCredentials();
+    public CheckoutResponse payExistingOrder(String username, Long orderId, PayOrderRequest request,
+                                             String ip, String idempotencyKey) {
+        requireValidKey(idempotencyKey);
         Payment payment = ownedPendingPayment(username, orderId);
-        return charge(payment, payment.getOrder(), request.email(), request.identityNumber(),
-                request.card(), request.forceThreeDS(), ip);
+        Order order = payment.getOrder();
+        return charge(payment, order, order.getUser(), request.email(), request.identityNumber(),
+                request.card(), request.forceThreeDS(), ip, idempotencyKey);
     }
 
     /** Ödemesi bekleyen siparişi iptal eder ve ayrılan stoğu geri bırakır. */
@@ -193,8 +174,8 @@ public class PaymentService {
         Payment payment = ownedPendingPayment(username, orderId);
         Order order = payment.getOrder();
         releaseStock(order);
-        payment.setStatus("CANCELLED");
-        order.setStatus("İptal edildi");
+        payment.setStatus(CANCELLED);
+        order.setStatus(ORDER_CANCELLED);
     }
 
     @Transactional
@@ -232,28 +213,15 @@ public class PaymentService {
     }
 
     private void refund(Payment payment, Order order, String ip) {
-        requireCredentials();
-
-        String iyzicoPaymentId = payment.getToken();
-        if (iyzicoPaymentId == null) {
+        if (payment.getAttemptId() != null) {
+            iyzicoService.refund(payment.getAttemptId(), ip);
+        } else if (payment.getToken() != null) {
+            // IyzicoService'ten önce alınmış ödeme: deneme kaydı yok, iyzico ödeme numarasıyla iade edilir.
+            iyzicoService.refundLegacy(payment.getToken(), order.getTotal(), ip, order.getId());
+        } else {
             throw new BadRequestException(
                     "iyzico ödeme numarası bulunamadı; iade iyzico panelinden elle yapılmalı.");
         }
-
-        CreateRefundV2Request request = new CreateRefundV2Request();
-        request.setLocale(Locale.TR.getValue());
-        request.setConversationId(order.getId().toString());
-        request.setPaymentId(iyzicoPaymentId);
-        request.setPrice(order.getTotal());
-        request.setIp(ip);
-
-        Refund result = callProvider(() -> Refund.createV2(request, options()));
-
-        boolean refundSucceeded = "success".equalsIgnoreCase(result.getStatus());
-        if (!refundSucceeded) {
-            throw new BadRequestException(providerError("İade yapılamadı", result.getErrorMessage()));
-        }
-
         log.info("Sipariş {} için {} TL iade edildi.", order.getId(), order.getTotal());
     }
 
@@ -270,270 +238,187 @@ public class PaymentService {
         return payment;
     }
 
-    private CheckoutResponse charge(Payment payment, Order order, String email, String identityNumber,
-                                    CheckoutRequest.Card card, boolean threeDS, String ip) {
-        CreatePaymentRequest iyzicoRequest = new CreatePaymentRequest();
-        iyzicoRequest.setLocale(Locale.TR.getValue());
-        iyzicoRequest.setConversationId(order.getId().toString());
-        iyzicoRequest.setPrice(order.getTotal());
-        iyzicoRequest.setPaidPrice(order.getTotal());
-        iyzicoRequest.setCurrency(Currency.TRY.name());
-        iyzicoRequest.setInstallment(1);
-        iyzicoRequest.setBasketId(order.getId().toString());
-        iyzicoRequest.setPaymentChannel(PaymentChannel.WEB.name());
-        iyzicoRequest.setPaymentGroup(PaymentGroup.PRODUCT.name());
-        iyzicoRequest.setPaymentCard(paymentCard(card));
-        iyzicoRequest.setBuyer(createBuyer(order, email, identityNumber, ip));
-        iyzicoRequest.setShippingAddress(createAddress(order));
-        iyzicoRequest.setBillingAddress(createAddress(order));
-        iyzicoRequest.setBasketItems(basketItems(order));
+    private CheckoutResponse charge(Payment payment, Order order, User user, String email, String identityNumber,
+                                    CheckoutRequest.Card card, boolean threeDS, String ip, String clientKey) {
+        // Anahtar kullanıcıya özel olsun: başka bir hesabın anahtarıyla çakışamaz.
+        String idempotencyKey = "u" + user.getId() + "-" + clientKey;
+        // 2D: servis iyzico'yu beklemeden kabul eder (asenkron). 3D: banka sayfası hemen gerekir (senkron).
+        boolean async = !threeDS;
+        AttemptResult result = iyzicoService.startPayment(idempotencyKey,
+                startPayment(order, user, email, identityNumber, card, threeDS, ip), async);
 
-        if (threeDS) {
-            iyzicoRequest.setCallbackUrl(callbackUrl);
-            ThreedsInitialize result = callProvider(() -> ThreedsInitialize.create(iyzicoRequest, options()));
-            String html = decodeHtml(result.getHtmlContent());
-            if (!"success".equalsIgnoreCase(result.getStatus()) || html == null) {
-                throw new BadRequestException(providerError("3D Secure doğrulaması başlatılamadı", result.getErrorMessage()));
+        payment.setAttemptId(result.attemptId());
+        if (result.iyzicoPaymentId() != null) {
+            payment.setToken(result.iyzicoPaymentId());
+        }
+        return switch (result.status()) {
+            // Kabul edildi, iyzico arka planda çağrılıyor. Sipariş "Ödeme bekliyor"da kalır;
+            // sonuç RabbitMQ olayıyla gelir, tarayıcı da durum adresini sorar.
+            case "CREATED", "SENT" -> {
+                payments.save(payment);
+                yield CheckoutResponse.processing(order.getId());
             }
-            payment.setToken(result.getPaymentId());
-            payments.save(payment);
-            return CheckoutResponse.threeDS(html);
-        }
-
-        com.iyzipay.model.Payment result = callProvider(() -> com.iyzipay.model.Payment.create(iyzicoRequest, options()));
-        if (!"success".equalsIgnoreCase(result.getStatus())) {
-            // Kart reddedildi: para çekilmedi. Hata fırlatınca işlem geri alınır.
-            throw new BadRequestException(providerError("Ödeme alınamadı", result.getErrorMessage()));
-        }
-        payment.setToken(result.getPaymentId());
-        boolean valid = result.verifySignature(secretKey) && matchesOrder(order, result);
-        applyResult(payment, order, result, valid);
-        payments.save(payment);
-        return CheckoutResponse.of(resultName(payment));
+            case "AWAITING_3DS" -> {
+                payments.save(payment);
+                yield CheckoutResponse.threeDS(result.threeDSHtmlContent());
+            }
+            case "SUCCEEDED", "VERIFYING" -> {
+                applyAttemptResult(payment, order, result.status());
+                payments.save(payment);
+                yield CheckoutResponse.of(resultName(payment));
+            }
+            // Para çekilmedi. Hata fırlatınca işlem geri alınır.
+            case "FAILED" -> throw new BadRequestException(threeDS
+                    ? withReason("3D Secure doğrulaması başlatılamadı", result.failureReason())
+                    : withReason("Ödeme alınamadı", result.failureReason()));
+            default -> throw new BadRequestException(
+                    "Ödeme işleniyor. Birkaç saniye sonra Siparişlerim sayfasını kontrol edin.");
+        };
     }
 
     /**
-     * iyzico, 3D Secure doğrulamasından sonra buraya POST eder.
-     * Dönen değer: success | review | failed | declined | pending
+     * iyzico, 3D Secure doğrulamasından sonra tarayıcıyı buraya POST ettirir; biz IyzicoService'e iletiriz.
+     * conversationId = ödeme denemesi numarası. Dönen değer: success | review | failed | declined | pending
      */
     @Transactional
-    public String completeThreeDS(String status, String paymentId, String conversationData,
-                                  String conversationId, String mdStatus) {
-        Long orderId;
+    public String completeThreeDS(IyzicoServiceClient.ThreeDSCallback callback) {
+        UUID attemptId;
         try {
-            orderId = Long.valueOf(conversationId);
-        } catch (NumberFormatException | NullPointerException e) {
+            attemptId = UUID.fromString(callback.conversationId());
+        } catch (IllegalArgumentException | NullPointerException e) {
             throw new BadRequestException("Geçersiz ödeme dönüşü.");
         }
-        Payment payment = payments.findByOrderIdForUpdate(orderId)
+        Payment payment = payments.findByAttemptIdForUpdate(attemptId)
                 .orElseThrow(() -> new ResourceNotFoundException("Ödeme bulunamadı."));
-        Order order = payment.getOrder();
 
+        // Sipariş iptal edildiyse veya süresi dolduysa dönüş iletilmez; para çekilmez.
         if (!PENDING.equals(payment.getStatus())) {
             return resultName(payment);
         }
-        if (payment.getToken() == null || !payment.getToken().equals(paymentId)) {
-            throw new BadRequestException("Ödeme dönüşü bu siparişle eşleşmiyor.");
-        }
 
-        if (!"success".equalsIgnoreCase(status) || !"1".equals(mdStatus)) {
-            // Banka doğrulaması geçmedi; para çekilmedi. Sipariş, yeniden denenebilmesi için beklemede kalır.
-            log.info("3D Secure doğrulaması başarısız: sipariş {}, mdStatus {}", orderId, mdStatus);
-            return "declined";
-        }
-
-        CreateThreedsPaymentRequest request = new CreateThreedsPaymentRequest();
-        request.setLocale(Locale.TR.getValue());
-        request.setConversationId(order.getId().toString());
-        request.setPaymentId(paymentId);
-        request.setConversationData(conversationData);
-        ThreedsPayment result = callProvider(() -> ThreedsPayment.create(request, options()));
-
-        if (!"success".equalsIgnoreCase(result.getStatus())) {
-            log.info("3D Secure ödemesi reddedildi: sipariş {}: {}", orderId, result.getErrorMessage());
-            return "declined";
-        }
-
-        boolean valid = result.verifySignature(secretKey)
-                && paymentId.equals(result.getPaymentId())
-                && matchesOrder(order, result);
-        applyResult(payment, order, result, valid);
-        return resultName(payment);
-    }
-
-    @Transactional
-    public int expireReservations() {
-        List<Payment> expiredPayments = payments
-                .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
-                        PENDING, LocalDateTime.now().minusMinutes(RESERVATION_MINUTES));
-        for (Payment payment : expiredPayments) {
-            Order order = payment.getOrder();
-            releaseStock(order);
-            payment.setStatus("EXPIRED");
-            order.setStatus("Ödeme süresi doldu");
-        }
-        return expiredPayments.size();
-    }
-
-    private void applyResult(Payment payment, Order order, PaymentResource result, boolean validResponse) {
-        // Ödeme API'si (Payment / ThreedsPayment) yanıtında paymentStatus alanı gelmez;
-        // status = success ve fraudStatus = 1 ödemenin alındığını gösterir. Alan gelirse
-        // SUCCESS dışındaki bir değeri başarısız sayarız.
-        boolean paid = "success".equalsIgnoreCase(result.getStatus())
-                && Integer.valueOf(1).equals(result.getFraudStatus())
-                && (result.getPaymentStatus() == null || "SUCCESS".equalsIgnoreCase(result.getPaymentStatus()));
-        boolean review = Integer.valueOf(0).equals(result.getFraudStatus());
-
-        if (!validResponse) {
-            // iyzico başarılı dedi ama imza/tutar tutmadı: para çekilmiş olabilir, elle kontrol gerekir.
-            log.warn("iyzico yanıtı doğrulanamadı, sipariş incelemeye alındı: {}", order.getId());
-            payment.setStatus("REVIEW");
-            order.setStatus("Ödeme inceleniyor");
-        } else if (paid) {
-            payment.setStatus("PAID");
-            order.setStatus("Hazırlanıyor");
-        } else if (review) {
-            payment.setStatus("REVIEW");
-            order.setStatus("Ödeme inceleniyor");
-        } else {
-            releaseStock(order);
-            payment.setStatus("FAILED");
-            order.setStatus("İptal edildi");
-        }
-
-        if ("PAID".equals(payment.getStatus()) || "REVIEW".equals(payment.getStatus())) {
-            users.findByIdForUpdate(order.getUser().getId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
-            cartItems.deleteAll(cartItems.findByUser_IdOrderByIdAsc(order.getUser().getId()));
-        }
-    }
-
-    private boolean matchesOrder(Order order, PaymentResource result) {
-        String id = order.getId().toString();
-        return id.equals(result.getBasketId())
-                && id.equals(result.getConversationId())
-                && Currency.TRY.name().equals(result.getCurrency())
-                && amountsMatch(order.getTotal(), result.getPrice(), result.getPaidPrice());
+        AttemptResult result = iyzicoService.completeThreeDS(attemptId, callback);
+        return switch (result.status()) {
+            case "SUCCEEDED", "VERIFYING" -> {
+                applyAttemptResult(payment, payment.getOrder(), result.status());
+                yield resultName(payment);
+            }
+            // Banka doğrulaması geçmedi veya kart reddedildi; para çekilmedi.
+            // Sipariş, yeniden denenebilmesi için beklemede kalır.
+            case "FAILED" -> "declined";
+            default -> "pending";
+        };
     }
 
     /**
-     * iyzico sandbox, yeni başlamış bir JVM'in ilk TLS bağlantılarını zaman zaman el sıkışmada keser
-     * ("Remote host terminated the handshake"). El sıkışma tamamlanmadan istek gövdesi gönderilmediği
-     * için bu durumda yeniden denemek güvenlidir; çift ödeme oluşmaz.
+     * Tarayıcının "ödemem ne oldu?" sorusu (asenkron 2D'de "Ödemeniz işleniyor…" ekranı bunu sorar).
+     * Sonuç genelde RabbitMQ olayıyla çoktan siparişe işlenmiştir. Olay gecikirse burada
+     * IyzicoService'e doğrudan sorulur ve aynı kuralla siparişe işlenir.
      */
-    private <T> T callProvider(Supplier<T> call) {
-        final int attempts = 3;
-        for (int attempt = 1; ; attempt++) {
-            try {
-                return call.get();
-            } catch (HttpClientException failure) {
-                if (!hasCause(failure, SSLHandshakeException.class)) {
-                    throw failure;
-                }
-                if (attempt >= attempts) {
-                    log.warn("iyzico SSL el sıkışması {} denemede de başarısız", attempts, failure);
-                    throw new BadRequestException(
-                            "iyzico bağlantısı kurulamadı. Lütfen birkaç saniye sonra tekrar deneyin.");
-                }
-                log.warn("iyzico SSL el sıkışması başarısız ({}. deneme), tekrar deneniyor: {}", attempt, failure.getMessage());
-                try {
-                    Thread.sleep(500L * attempt);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw new BadRequestException("iyzico bağlantısı kesildi. Lütfen tekrar deneyin.");
-                }
-            }
+    @Transactional
+    public PaymentStatusResponse paymentStatus(String username, Long orderId) {
+        Payment payment = payments.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı."));
+        Order order = payment.getOrder();
+        if (order.getUser() == null || !username.equals(order.getUser().getUsername())) {
+            throw new ResourceNotFoundException("Sipariş bulunamadı.");
         }
+        if (!PENDING.equals(payment.getStatus()) || payment.getAttemptId() == null) {
+            return PaymentStatusResponse.of(statusName(payment));
+        }
+        AttemptResult attempt;
+        try {
+            attempt = iyzicoService.getAttempt(payment.getAttemptId());
+        } catch (RuntimeException unavailable) {
+            return PaymentStatusResponse.of("processing");
+        }
+        return switch (attempt.status()) {
+            case "SUCCEEDED", "VERIFYING" -> {
+                applyAttemptResult(payment, order, attempt.status());
+                yield PaymentStatusResponse.of(statusName(payment));
+            }
+            // Para çekilmedi; sipariş beklemede kalır, kullanıcı başka kartla tekrar deneyebilir.
+            case "FAILED" -> new PaymentStatusResponse("declined", attempt.failureReason());
+            case "AWAITING_3DS" -> PaymentStatusResponse.of("pending");
+            default -> PaymentStatusResponse.of("processing");
+        };
     }
 
-    private boolean hasCause(Throwable error, Class<? extends Throwable> causeType) {
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            if (causeType.isInstance(cause)) {
-                return true;
+    /**
+     * Süresi dolan rezervasyonları bırakır. Ödemesi o anda iyzico'da işlenen sipariş
+     * (CREATED/SENT/CONFIRM_SENT/VERIFYING) atlanır: sonucu beklenir, yoksa para çekilip sipariş
+     * düşmüş olabilirdi. IyzicoService'e ulaşılamazsa da atlanır (güvenli taraf).
+     */
+    @Transactional
+    public int expireReservations() {
+        List<Payment> candidates = payments
+                .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+                        PENDING, LocalDateTime.now().minusMinutes(RESERVATION_MINUTES));
+        int expired = 0;
+        for (Payment payment : candidates) {
+            Order order = payment.getOrder();
+            String attemptStatus = currentAttemptStatus(payment);
+            if (attemptStatus == null || IN_FLIGHT_AT_PROVIDER.contains(attemptStatus)) {
+                log.info("Sipariş {} ödemesi işleniyor ({}), süre dolumu ertelendi", order.getId(), attemptStatus);
+                continue;
             }
+            if ("SUCCEEDED".equals(attemptStatus)) {
+                // Olay henüz gelmedi ama para alınmış: siparişi düşürme, tamamla.
+                applyAttemptResult(payment, order, attemptStatus);
+                continue;
+            }
+            releaseStock(order);
+            payment.setStatus("EXPIRED");
+            order.setStatus("Ödeme süresi doldu");
+            expired++;
         }
-        return false;
+        return expired;
     }
 
-    private static String decodeHtml(String content) {
-        if (content == null || content.isBlank()) {
-            return null;
-        }
-        String trimmed = content.trim();
-        if (trimmed.startsWith("<")) {
-            return trimmed;
+    /** Denemesi yoksa "NONE"; servise ulaşılamazsa null. */
+    private String currentAttemptStatus(Payment payment) {
+        if (payment.getAttemptId() == null) {
+            return "NONE";
         }
         try {
-            return new String(Base64.getDecoder().decode(trimmed), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
+            return iyzicoService.getAttempt(payment.getAttemptId()).status();
+        } catch (RuntimeException unavailable) {
             return null;
         }
     }
 
-    private static String providerError(String prefix, String message) {
-        return message == null || message.isBlank() ? prefix + "." : prefix + ": " + message;
-    }
-
-    private void requireCredentials() {
-        if (apiKey.isBlank() || secretKey.isBlank()) {
-            throw new BadRequestException("iyzico API anahtarları yapılandırılmamış.");
+    /** IyzicoService sonucunu sipariş durumuna yansıtır. SUCCEEDED → PAID, VERIFYING → REVIEW. */
+    public void applyAttemptResult(Payment payment, Order order, String attemptStatus) {
+        if ("SUCCEEDED".equals(attemptStatus)) {
+            payment.setStatus(PAID);
+            order.setStatus("Hazırlanıyor");
+        } else {
+            // Para çekilmiş olabilir ama doğrulanamadı: elle veya mutabakatla kontrol edilir.
+            log.warn("Sipariş {} ödemesi doğrulanamadı, incelemeye alındı", order.getId());
+            payment.setStatus(REVIEW);
+            order.setStatus("Ödeme inceleniyor");
         }
+        users.findByIdForUpdate(order.getUser().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
+        cartItems.deleteAll(cartItems.findByUser_IdOrderByIdAsc(order.getUser().getId()));
     }
 
-    private boolean amountsMatch(BigDecimal expected, BigDecimal price, BigDecimal paidPrice) {
-        return price != null && paidPrice != null
-                && expected.compareTo(price) == 0
-                && expected.compareTo(paidPrice) == 0;
-    }
-
-    private static PaymentCard paymentCard(CheckoutRequest.Card card) {
-        PaymentCard paymentCard = new PaymentCard();
-        paymentCard.setCardHolderName(card.holderName().trim());
-        paymentCard.setCardNumber(card.number());
-        paymentCard.setExpireMonth(card.expireMonth());
-        paymentCard.setExpireYear(card.expireYear());
-        paymentCard.setCvc(card.cvc());
-        paymentCard.setRegisterCard(0);
-        return paymentCard;
-    }
-
-    private static List<BasketItem> basketItems(Order order) {
-        List<BasketItem> items = new ArrayList<>();
-        for (OrderItem orderItem : order.getItems()) {
-            BasketItem item = new BasketItem();
-            item.setId(orderItem.getProductId().toString());
-            item.setName(orderItem.getProductName());
-            item.setCategory1("Ürün");
-            item.setCategory2("Genel");
-            item.setItemType(BasketItemType.PHYSICAL.name());
-            item.setPrice(orderItem.getPrice().multiply(BigDecimal.valueOf(orderItem.getQuantity())));
-            items.add(item);
-        }
-        return items;
-    }
-
-    private static Buyer createBuyer(Order order, String email, String identityNumber, String ip) {
-        Buyer buyer = new Buyer();
-        buyer.setId(order.getUser().getId().toString());
-        buyer.setName(order.getFirstName());
-        buyer.setSurname(order.getLastName());
-        buyer.setGsmNumber(order.getPhone());
-        buyer.setEmail(email.trim());
-        buyer.setIdentityNumber(identityNumber);
-        buyer.setRegistrationAddress(order.getAddress());
-        buyer.setIp(ip);
-        buyer.setCity(order.getCity());
-        buyer.setCountry("Turkey");
-        return buyer;
-    }
-
-    private static Address createAddress(Order order) {
-        Address address = new Address();
-        address.setContactName(order.getFirstName() + " " + order.getLastName());
-        address.setCity(order.getCity());
-        address.setCountry("Turkey");
-        address.setAddress(order.getAddress());
-        return address;
+    private static StartPayment startPayment(Order order, User user, String email, String identityNumber,
+                                             CheckoutRequest.Card card, boolean threeDS, String ip) {
+        String contactName = order.getFirstName() + " " + order.getLastName();
+        List<IyzicoServiceClient.BasketItem> items = order.getItems().stream()
+                .map(item -> new IyzicoServiceClient.BasketItem(
+                        item.getProductId().toString(),
+                        item.getProductName(),
+                        item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()))))
+                .toList();
+        return new StartPayment(
+                order.getId(), order.getTotal(), threeDS, ip,
+                new IyzicoServiceClient.Buyer(user.getId().toString(), order.getFirstName(), order.getLastName(),
+                        email.trim(), order.getPhone(), identityNumber, order.getCity(), order.getAddress()),
+                new IyzicoServiceClient.Address(contactName, order.getCity(), order.getAddress()),
+                items,
+                new IyzicoServiceClient.Card(card.holderName().trim(), card.number(), card.expireMonth(),
+                        card.expireYear(), card.cvc()));
     }
 
     private void releaseStock(Order order) {
@@ -546,12 +431,23 @@ public class PaymentService {
         }
     }
 
-    private Options options() {
-        Options options = new Options();
-        options.setApiKey(apiKey);
-        options.setSecretKey(secretKey);
-        options.setBaseUrl(baseUrl);
-        return options;
+    private static void requireValidKey(String idempotencyKey) {
+        if (idempotencyKey == null || !CLIENT_KEY.matcher(idempotencyKey).matches()) {
+            throw new BadRequestException("Geçersiz Idempotency-Key. Sayfayı yenileyip tekrar deneyin.");
+        }
+    }
+
+    private static String withReason(String prefix, String reason) {
+        return reason == null || reason.isBlank() ? prefix + "." : prefix + ": " + reason;
+    }
+
+    private static String statusName(Payment payment) {
+        return switch (payment.getStatus()) {
+            case "PAID" -> "success";
+            case "REVIEW" -> "review";
+            case "PENDING" -> "pending";
+            default -> "failed";
+        };
     }
 
     private static String resultName(Payment payment) {
