@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.payment.client;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.exception.NotRefundableException;
 import com.sarikaya.e_ticaret.exception.PaymentServiceUnavailableException;
@@ -120,7 +121,8 @@ public class IyzicoServiceClient {
 
     // ---------------------------------------------------------------- istek/cevap gövdeleri
 
-    public record StartPayment(Long orderId, BigDecimal amount, boolean threeDS, String clientIp,
+    /** Tutarlar JSON'da metin olarak gider ("25.00"): karşı taraf float'a çevirmesin. */
+    public record StartPayment(Long orderId, @JsonFormat(shape = JsonFormat.Shape.STRING) BigDecimal amount, boolean threeDS, String clientIp,
                                Buyer buyer, Address address, List<BasketItem> items, Card card) {
     }
 
@@ -131,7 +133,7 @@ public class IyzicoServiceClient {
     public record Address(String contactName, String city, String address) {
     }
 
-    public record BasketItem(String id, String name, BigDecimal price) {
+    public record BasketItem(String id, String name, @JsonFormat(shape = JsonFormat.Shape.STRING) BigDecimal price) {
     }
 
     public record Card(String holderName, String number, String expireMonth, String expireYear, String cvc) {
@@ -154,6 +156,6 @@ public class IyzicoServiceClient {
     private record RefundBody(String clientIp) {
     }
 
-    private record LegacyRefundBody(String iyzicoPaymentId, BigDecimal amount, String clientIp, Long orderId) {
+    private record LegacyRefundBody(String iyzicoPaymentId, @JsonFormat(shape = JsonFormat.Shape.STRING) BigDecimal amount, String clientIp, Long orderId) {
     }
 }

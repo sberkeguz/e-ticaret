@@ -3,6 +3,7 @@ package com.sarikaya.e_ticaret.payment.service;
 import com.sarikaya.e_ticaret.cart.entity.CartItem;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
+import com.sarikaya.e_ticaret.exception.PaymentServiceUnavailableException;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
@@ -243,12 +244,35 @@ class PaymentServiceTest {
         Product product = product(2, "12.50");
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("AWAITING_3DS"));
 
         service.cancelPendingOrder("buyer", 42L);
 
         assertEquals(4, product.getStock());
         assertEquals("CANCELLED", payment.getStatus());
         assertEquals("İptal edildi", payment.getOrder().getStatus());
+    }
+
+    @Test
+    void cannotCancelWhileChargeIsInFlight() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SENT"));
+
+        BadRequestException error = assertThrows(BadRequestException.class, () -> service.cancelPendingOrder("buyer", 42L));
+        assertTrue(error.getMessage().contains("işleniyor"));
+        assertEquals("PENDING", payment.getStatus());
+        verifyNoInteractions(products);
+    }
+
+    @Test
+    void cannotCancelWhenPaymentServiceIsUnreachable() {
+        Payment payment = pendingPayment();
+        when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
+        when(iyzicoService.getAttempt(ATTEMPT)).thenThrow(new RuntimeException("kapalı"));
+
+        assertThrows(PaymentServiceUnavailableException.class, () -> service.cancelPendingOrder("buyer", 42L));
+        assertEquals("PENDING", payment.getStatus());
     }
 
     @Test

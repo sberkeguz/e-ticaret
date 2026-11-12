@@ -5,15 +5,38 @@
         POSTGRES_DB: eticaret
         POSTGRES_USER: eticaret_user
         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eticaret_dev_password}
+        # Servis kullanıcılarının şifreleri (yalnızca ilk kurulumda kullanılır)
+        BACKEND_DB_PASSWORD: ${BACKEND_DB_PASSWORD:-backend_dev_password}
+        IYZICO_DB_PASSWORD: ${IYZICO_DB_PASSWORD:-iyzico_dev_password}
       ports:
         - "5432:5432"
       volumes:
         - postgres_data:/var/lib/postgresql/data
+        # Boş veritabanı ilk açıldığında servis kullanıcılarını kurar (backend_app, iyzico_app)
+        - ./docker/postgres/init/10-service-roles.sh:/docker-entrypoint-initdb.d/10-service-roles.sh:ro
+        - ./docker/postgres/service-roles.sql:/docker-entrypoint-initdb.d/service-roles.sql.txt:ro
       healthcheck:
         test: [ "CMD-SHELL", "pg_isready -U eticaret_user -d eticaret" ]
         interval: 5s
         timeout: 5s
         retries: 10
+
+    # Veritabanı yönetim paneli: http://localhost:5050 (yalnızca bu bilgisayardan)
+    pgadmin:
+      image: dpage/pgadmin4:9
+      environment:
+        PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+        PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_dev_password}
+        PGADMIN_CONFIG_SERVER_MODE: "True"
+      ports:
+        - "127.0.0.1:5050:80"
+      volumes:
+        - pgadmin_data:/var/lib/pgadmin
+        # Açılışta e-ticaret veritabanı bağlantısı hazır gelir (şifreyi ilk bağlanışta sorar).
+        - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      depends_on:
+        postgres:
+          condition: service_healthy
 
     # Servisler arası mesajlaşma. Yönetim arayüzü: http://localhost:15672 (DLQ'lar burada görünür)
     rabbitmq:
@@ -38,7 +61,8 @@
         context: ./services/iyzico-service
         dockerfile: Dockerfile
       environment:
-        DATABASE_URL: postgresql://eticaret_user:${POSTGRES_PASSWORD:-eticaret_dev_password}@postgres:5432/eticaret?schema=iyzico
+        # Yalnızca iyzico şemasına yetkili kullanıcı
+        DATABASE_URL: postgresql://iyzico_app:${IYZICO_DB_PASSWORD:-iyzico_dev_password}@postgres:5432/eticaret?schema=iyzico
         RABBITMQ_URL: amqp://${RABBITMQ_USER:-eticaret}:${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}@rabbitmq:5672
         INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
         IYZIPAY_API_KEY: ${IYZIPAY_API_KEY:-}
@@ -46,6 +70,8 @@
         IYZIPAY_BASE_URL: ${IYZIPAY_BASE_URL:-https://sandbox-api.iyzipay.com}
         # 3D dönüşü tarayıcıdan backend'e gelir (ngrok), backend bu servise iletir.
         IYZIPAY_CALLBACK_URL: ${IYZIPAY_CALLBACK_URL:-http://localhost:8080/api/payments/callback}
+        # iyzico ~10 dk sessizlikten sonra ilk bağlantıyı düşürüyor; 4 dk'da bir küçük istekle sıcak tutulur. 0 = kapalı.
+        IYZIPAY_KEEP_WARM_MS: ${IYZIPAY_KEEP_WARM_MS:-240000}
       ports:
         # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, Swagger UI).
         - "127.0.0.1:8081:8081"
@@ -66,8 +92,9 @@
         dockerfile: Dockerfile
       environment:
         SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/eticaret
-        SPRING_DATASOURCE_USERNAME: eticaret_user
-        SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-eticaret_dev_password}
+        # Yalnızca public şemasına yetkili kullanıcı
+        SPRING_DATASOURCE_USERNAME: backend_app
+        SPRING_DATASOURCE_PASSWORD: ${BACKEND_DB_PASSWORD:-backend_dev_password}
         JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
         IYZICO_SERVICE_URL: http://iyzico-service:8081
         RABBITMQ_HOST: rabbitmq
@@ -97,3 +124,4 @@
   volumes:
     postgres_data:
     rabbitmq_data:
+    pgadmin_data:

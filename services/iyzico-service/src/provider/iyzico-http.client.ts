@@ -7,6 +7,8 @@ import { ProviderNoAnswerError, ProviderNotReachedError } from "./iyzico.gateway
 export type IyzicoResponse = Record<string, unknown>;
 
 const HANDSHAKE_ATTEMPTS = 3;
+/** Tekrar denemeden önce kısa bekleme (deneme sayısıyla artar). */
+const RETRY_BACKOFF_MS = 100;
 
 /**
  * iyzico REST API'sine imzalı POST (IYZWSv2). Resmî Node SDK'sının zaman aşımı yok ve
@@ -15,6 +17,11 @@ const HANDSHAKE_ATTEMPTS = 3;
  * Ayrım TLS el sıkışmasına göre yapılır: el sıkışma bitmeden istek gövdesi gönderilmez.
  *  - El sıkışmadan önce hata → ProviderNotReachedError (para çekilmedi, tekrar denemek güvenli)
  *  - El sıkışmadan sonra hata / zaman aşımı / okunamayan cevap → ProviderNoAnswerError
+ *
+ * Bağlantı + el sıkışma normalde ~40 ms sürer. iyzico sandbox, uzun aradan sonraki ilk bağlantıyı
+ * el sıkışma sırasında yaklaşık 3,5 sn sonra keser (o süre boyunca yeni bağlantılar da kurulamıyor).
+ * El sıkışmaya ayrı bir üst sınır tanırız (handshakeTimeoutMs): dolarsa istek gövdesi hiç gönderilmediği
+ * için tekrar denemek güvenlidir.
  */
 export class IyzicoHttpClient {
   private readonly log = new Logger(IyzicoHttpClient.name);
@@ -24,6 +31,7 @@ export class IyzicoHttpClient {
     private readonly apiKey: string,
     private readonly secretKey: string,
     private readonly timeoutMs: number,
+    private readonly handshakeTimeoutMs: number = 10_000,
   ) {}
 
   async post(path: string, body: object): Promise<IyzicoResponse> {
@@ -34,7 +42,7 @@ export class IyzicoHttpClient {
         // iyzico sandbox, yeni açılan süreçlerin ilk TLS bağlantılarını zaman zaman keser.
         if (error instanceof ProviderNotReachedError && attempt < HANDSHAKE_ATTEMPTS) {
           this.log.warn(`iyzico'ya bağlanılamadı (${attempt}. deneme), tekrar deneniyor: ${error.message}`);
-          await sleep(500 * attempt);
+          await sleep(RETRY_BACKOFF_MS * attempt);
           continue;
         }
         throw error;
@@ -89,9 +97,16 @@ export class IyzicoHttpClient {
         },
       );
       req.on("socket", (socket) => {
+        // El sıkışma süresi dolarsa bağlantıyı keseriz; gövde henüz gitmediği için "ulaşılamadı" sayılır.
+        const handshakeTimer = setTimeout(
+          () => req.destroy(new Error(`TLS el sıkışması ${this.handshakeTimeoutMs} ms içinde bitmedi`)),
+          this.handshakeTimeoutMs,
+        );
         (socket as TLSSocket).once("secureConnect", () => {
           handshakeDone = true;
+          clearTimeout(handshakeTimer);
         });
+        socket.once("close", () => clearTimeout(handshakeTimer));
       });
       req.on("timeout", () => req.destroy(new Error(`${this.timeoutMs} ms içinde cevap gelmedi`)));
       req.on("error", fail);

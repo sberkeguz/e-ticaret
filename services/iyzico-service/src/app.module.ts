@@ -6,12 +6,14 @@ import { PaymentController } from "./api/payment.controller.js";
 import { ProblemFilter } from "./api/problem.filter.js";
 import { AttemptStore } from "./attempt/attempt.store.js";
 import { APP_CONFIG, loadConfig } from "./config.js";
+import { OutboxCleanup } from "./events/outbox-cleanup.js";
 import { OutboxRelay } from "./events/outbox-relay.js";
 import { BackgroundWork } from "./payment/background-work.js";
 import { Reconciler } from "./payment/reconciler.js";
 import { PaymentAttemptService } from "./payment/payment-attempt.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { IyzicoApiGateway } from "./provider/iyzico-api.gateway.js";
+import { IyzicoKeepWarm } from "./provider/iyzico-keep-warm.js";
 import { IyzicoGateway } from "./provider/iyzico.gateway.js";
 
 @Module({
@@ -23,7 +25,9 @@ import { IyzicoGateway } from "./provider/iyzico.gateway.js";
     PaymentAttemptService,
     BackgroundWork,
     Reconciler,
+    IyzicoKeepWarm,
     OutboxRelay,
+    OutboxCleanup,
     { provide: IyzicoGateway, useClass: IyzicoApiGateway },
     { provide: APP_GUARD, useClass: InternalTokenGuard },
     { provide: APP_FILTER, useClass: ProblemFilter },

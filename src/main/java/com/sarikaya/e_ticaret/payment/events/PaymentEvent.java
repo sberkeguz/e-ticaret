@@ -10,7 +10,8 @@ import java.util.UUID;
  * Tanımadığımız yeni alanlar görmezden gelinir: yayıncı alan ekleyebilir, silemez.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record PaymentEvent(String messageId, String type, int version, String occurredAt, String traceId, Data data) {
+public record PaymentEvent(String messageId, String type, Integer version, String occurredAt, String traceId, Data data,
+                           /* Artan sıra numarası; eski olaylarda yok (null). */ Long sequence) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Data(
@@ -20,7 +21,7 @@ public record PaymentEvent(String messageId, String type, int version, String oc
             String status,
             BigDecimal amount,
             String currency,
-            boolean threeDS,
+            /* Eksik gelirse null; sürüm kuralı gereği eksik alan mesajı reddettirmez. */ Boolean threeDS,
             String iyzicoPaymentId,
             String failureReason) {
     }

@@ -145,7 +145,7 @@ export async function record(tx: Tx, attempt: PaymentAttempt, transition: Transi
       ...(transition.failureReason != null && { failureReason: limit(transition.failureReason) }),
     },
   });
-  await tx.paymentAttemptEvent.create({
+  const historyRow = await tx.paymentAttemptEvent.create({
     data: {
       attemptId: attempt.id,
       fromStatus: attempt.status,
@@ -156,7 +156,8 @@ export async function record(tx: Tx, attempt: PaymentAttempt, transition: Transi
   });
   // Outbox: olay, durum değişikliğiyle AYNI işlemde yazılır. İşlem geri alınırsa olay da
   // yazılmamış olur; işlem tamamlanırsa olay kaybolmaz (relay mutlaka gönderir).
-  const outboxRow = outboxRowFor(updated);
+  // Sıra numarası: geçmiş satırının numarası. Sürekli artar; dinleyici eskisini yenisinden ayırabilir.
+  const outboxRow = outboxRowFor(updated, Number(historyRow.id));
   if (outboxRow) {
     await tx.outboxMessage.create({ data: outboxRow });
   }

@@ -27,6 +27,11 @@ export interface PaymentEvent {
   messageId: string;
   type: string;
   version: number;
+  /**
+   * Olayın sırası (sürekli artar). Aynı ödemenin olayları kuyrukta yer değiştirse bile dinleyici,
+   * elindekinden daha eski numaralı olayı uygulamaz. (Sürüm 1'e sonradan eklendi; eski olaylarda yok.)
+   */
+  sequence: number;
   occurredAt: string;
   traceId: string;
   data: {
@@ -43,7 +48,7 @@ export interface PaymentEvent {
 }
 
 /** Deneme bu duruma geçtiyse yazılacak outbox satırı; olay yoksa null. */
-export function outboxRowFor(attempt: PaymentAttempt): Prisma.OutboxMessageCreateInput | null {
+export function outboxRowFor(attempt: PaymentAttempt, sequence: number): Prisma.OutboxMessageCreateInput | null {
   const event = EVENTS[attempt.status];
   if (!event) {
     return null;
@@ -54,6 +59,7 @@ export function outboxRowFor(attempt: PaymentAttempt): Prisma.OutboxMessageCreat
     messageId,
     type: event.type,
     version: EVENT_VERSION,
+    sequence,
     occurredAt: now.toISOString(),
     traceId: attempt.traceId,
     data: {

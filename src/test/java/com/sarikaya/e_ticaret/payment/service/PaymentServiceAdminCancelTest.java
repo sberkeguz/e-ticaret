@@ -111,13 +111,27 @@ class PaymentServiceAdminCancelTest {
     void pendingPaymentIsClosedWithoutRefund() {
         order.setStatus("Ödeme bekliyor");
         Payment payment = payment("PENDING");
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "FAILED", null, "Kart reddedildi", "t", null));
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
-        verifyNoInteractions(iyzicoService);
+        verify(iyzicoService, never()).refund(any(), any());
         assertEquals("CANCELLED", payment.getStatus());
         assertEquals("İptal edildi", order.getStatus());
         assertEquals(5, product.getStock());
+    }
+
+    @Test
+    void adminCannotCancelWhileChargeIsInFlight() {
+        order.setStatus("Ödeme bekliyor");
+        Payment payment = payment("PENDING");
+        when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
+                ATTEMPT, 42L, "SENT", null, null, "t", null));
+
+        assertThrows(BadRequestException.class, () -> service.cancelByAdmin(42L, "127.0.0.1"));
+        assertEquals("PENDING", payment.getStatus());
+        assertEquals(3, product.getStock());
     }
 
     @Test

@@ -27,8 +27,11 @@ const luhnValid = (number) => {
     }
     return number.length >= 15 && sum % 10 === 0;
 };
-const PROCESSING_CHECK_MS = 1500;
-const PROCESSING_MAX_CHECKS = 60; // ~90 sn; sonrasında Siparişlerim'e yönlendirilir
+export const PAYMENT_REASON_KEY = "payment-reason";
+// Ödeme genelde 0,5 sn içinde biter: ilk soru erken, sonrakiler saniyede bir.
+const PROCESSING_FIRST_CHECK_MS = 500;
+const PROCESSING_CHECK_MS = 1000;
+const PROCESSING_MAX_CHECKS = 90; // ~90 sn; sonrasında Siparişlerim'e yönlendirilir
 const PAYMENT_RESULTS = ["success", "failed", "review", "pending", "declined", "error"];
 
 const blankForm = {
@@ -308,8 +311,12 @@ export default function Checkout() {
                 const status = response.ok ? await response.json() : null;
                 if (!active) return;
                 if (status && ["success", "review", "declined", "failed"].includes(status.result)) {
-                    const reason = status.message ? `&reason=${encodeURIComponent(status.message)}` : "";
-                    navigate(`/orders?payment=${status.result}${reason}`, { replace: true });
+                    // Sebep adrese yazılmaz (sahte linkle sahte mesaj gösterilemesin); bu sekmenin hafızasında taşınır.
+                    try {
+                        if (status.message) sessionStorage.setItem(PAYMENT_REASON_KEY, status.message);
+                        else sessionStorage.removeItem(PAYMENT_REASON_KEY);
+                    } catch { /* gizli sekme vb.: sebepsiz devam */ }
+                    navigate(`/orders?payment=${status.result}`, { replace: true });
                     return;
                 }
             } catch {
@@ -322,7 +329,7 @@ export default function Checkout() {
             }
             timer = setTimeout(check, PROCESSING_CHECK_MS);
         };
-        let timer = setTimeout(check, PROCESSING_CHECK_MS);
+        let timer = setTimeout(check, PROCESSING_FIRST_CHECK_MS);
         return () => { active = false; clearTimeout(timer); };
     }, [processingOrderId, navigate]);
 

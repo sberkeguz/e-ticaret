@@ -2,6 +2,7 @@ package com.sarikaya.e_ticaret.payment.service;
 
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
+import com.sarikaya.e_ticaret.exception.PaymentServiceUnavailableException;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
@@ -172,6 +173,7 @@ public class PaymentService {
     @Transactional
     public void cancelPendingOrder(String username, Long orderId) {
         Payment payment = ownedPendingPayment(username, orderId);
+        requireNoChargeInFlight(payment);
         Order order = payment.getOrder();
         releaseStock(order);
         payment.setStatus(CANCELLED);
@@ -205,6 +207,7 @@ public class PaymentService {
             payment.setStatus(REFUNDED);
             releaseStock(order);
         } else if (paymentIsPending) {
+            requireNoChargeInFlight(payment);
             payment.setStatus(CANCELLED);
             releaseStock(order);
         }
@@ -372,6 +375,20 @@ public class PaymentService {
             expired++;
         }
         return expired;
+    }
+
+    /**
+     * Para çekme isteği o anda iyzico'da sürüyorsa sipariş iptal edilmez: iptal edilseydi para
+     * çekilip hemen iade edilecekti (kullanıcının kartında çekim + iade görünürdü).
+     */
+    private void requireNoChargeInFlight(Payment payment) {
+        String attemptStatus = currentAttemptStatus(payment);
+        if (attemptStatus == null) {
+            throw new PaymentServiceUnavailableException();
+        }
+        if (IN_FLIGHT_AT_PROVIDER.contains(attemptStatus)) {
+            throw new BadRequestException("Ödemeniz şu an işleniyor. Sonuçlandıktan sonra iptal edebilirsiniz.");
+        }
     }
 
     /** Denemesi yoksa "NONE"; servise ulaşılamazsa null. */

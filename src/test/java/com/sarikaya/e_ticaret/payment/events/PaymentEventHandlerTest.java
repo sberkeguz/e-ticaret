@@ -180,6 +180,50 @@ class PaymentEventHandlerTest {
         verifyNoInteractions(payments, paymentService, refunder);
     }
 
+    @Test
+    void olderEventDoesNotOverrideNewerOne() {
+        // "Başarılı" (sıra 7) önce işlendi; ardından gecikmiş "doğrulanıyor" (sıra 5) geliyor.
+        Payment payment = payment("PAID", ATTEMPT);
+        payment.setLastEventSequence(7L);
+        allowProcessing();
+
+        handler().handle("m-2", withSequence(event("VERIFYING", ATTEMPT), 5L));
+
+        assertEquals("PAID", payment.getStatus());
+        assertEquals(7L, payment.getLastEventSequence());
+        verifyNoInteractions(paymentService, refunder);
+    }
+
+    @Test
+    void newerEventIsAppliedAndRemembered() {
+        Payment payment = payment("PENDING", ATTEMPT);
+        payment.setLastEventSequence(5L);
+        allowProcessing();
+
+        handler().handle("m-3", withSequence(event("SUCCEEDED", ATTEMPT), 7L));
+
+        assertEquals(7L, payment.getLastEventSequence());
+        verify(paymentService).applyAttemptResult(payment, payment.getOrder(), "SUCCEEDED");
+    }
+
+    private static PaymentEvent withSequence(PaymentEvent event, Long sequence) {
+        return new PaymentEvent(event.messageId(), event.type(), event.version(), event.occurredAt(), event.traceId(), event.data(), sequence);
+    }
+
+    @Test
+    void eventMissingOptionalFieldsIsStillProcessed() throws Exception {
+        // Daha eski ya da sade bir yayıncı threeDS/version göndermese de olay okunur.
+        String body = """
+                {"messageId":"m-9","type":"PaymentFailed","data":{"attemptId":"%s","orderId":42,"status":"FAILED"}}"""
+                .formatted(ATTEMPT);
+        PaymentEvent event = tools.jackson.databind.json.JsonMapper.builder().build().readValue(body, PaymentEvent.class);
+        allowProcessing();
+
+        handler().handle("m-9", event);
+
+        assertEquals(null, event.data().threeDS());
+    }
+
     private void allowProcessing() {
         when(processed.markProcessed(anyString(), anyString())).thenReturn(true);
     }
@@ -204,6 +248,6 @@ class PaymentEventHandlerTest {
             default -> "PaymentSomething";
         };
         return new PaymentEvent("m-1", type, 1, "2026-11-12T10:00:00Z", "t".repeat(32),
-                new PaymentEvent.Data(attemptId, 42L, status, new BigDecimal("25.00"), "TRY", false, "iyzico-1", null));
+                new PaymentEvent.Data(attemptId, 42L, status, new BigDecimal("25.00"), "TRY", false, "iyzico-1", null), null);
     }
 }

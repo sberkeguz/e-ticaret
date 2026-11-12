@@ -5,6 +5,7 @@ import StoreHeader from "../components/StoreHeader";
 import { clearRemoved } from "../cart";
 
 import { ORDER_STEPS, CANCELLED } from "../orderStatus";
+import { PAYMENT_REASON_KEY } from "./Checkout";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const formatDate = (value) => new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
@@ -94,7 +95,16 @@ export default function MyOrders() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const paymentResult = searchParams.get("payment");
-    const paymentReason = searchParams.get("reason");
+    // Reddedilme sebebi ödeme ekranından bu sekmenin hafızasıyla gelir (adresten okunmaz). Bir kez gösterilir.
+    const [paymentReason] = useState(() => {
+        try {
+            const reason = sessionStorage.getItem(PAYMENT_REASON_KEY);
+            sessionStorage.removeItem(PAYMENT_REASON_KEY);
+            return paymentResult === "declined" ? reason : null;
+        } catch {
+            return null;
+        }
+    });
     const [cancellingId, setCancellingId] = useState(null);
     const [openDetails, setOpenDetails] = useState(() => new Set());
     const toggleDetails = (id) => setOpenDetails((current) => {

@@ -10,6 +10,10 @@ export interface AppConfig {
   outboxIntervalMs: number;
   /** Mutabakat işi bu aralıkla çalışır; 0 = kapalı. */
   reconcileIntervalMs: number;
+  /** Temizlik işi bu aralıkla çalışır; 0 = kapalı. */
+  cleanupIntervalMs: number;
+  /** Gönderilmiş outbox satırları bu kadar gün saklanır. */
+  outboxRetentionDays: number;
   iyzico: {
     apiKey: string;
     secretKey: string;
@@ -17,6 +21,10 @@ export interface AppConfig {
     /** 3D dönüşü tarayıcıdan backend'e gelir (ngrok), backend bu servise iletir. */
     callbackUrl: string;
     timeoutMs: number;
+    /** Bağlantı + TLS el sıkışması için süre; dolarsa hemen tekrar denenir (istek henüz gitmemiştir). */
+    handshakeTimeoutMs: number;
+    /** iyzico bağlantısını sıcak tutmak için küçük istek aralığı; 0 = kapalı. */
+    keepWarmIntervalMs: number;
   };
 }
 
@@ -30,12 +38,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rabbitmqUrl: env.RABBITMQ_URL ?? "",
     outboxIntervalMs: Number(env.OUTBOX_INTERVAL_MS ?? 1_000),
     reconcileIntervalMs: Number(env.RECONCILE_INTERVAL_MS ?? 60_000),
+    cleanupIntervalMs: Number(env.CLEANUP_INTERVAL_MS ?? 60 * 60_000),
+    outboxRetentionDays: Number(env.OUTBOX_RETENTION_DAYS ?? 7),
     iyzico: {
       apiKey: env.IYZIPAY_API_KEY ?? "",
       secretKey: env.IYZIPAY_SECRET_KEY ?? "",
       baseUrl: env.IYZIPAY_BASE_URL ?? "https://sandbox-api.iyzipay.com",
       callbackUrl: env.IYZIPAY_CALLBACK_URL ?? "http://localhost:8080/api/payments/callback",
       timeoutMs: Number(env.IYZIPAY_TIMEOUT_MS ?? 60_000),
+      // 1 sn denendi: sandbox uzun aradan sonra birkaç saniye hiç bağlantı kabul etmediği için
+      // 3 deneme de düştü ve ödeme başarısız oldu. Kopmalar ~3,5 sn'de kendiliğinden geliyor;
+      // bu süre yalnızca hiç cevap gelmeyen bağlantının sonsuza dek beklemesini önler.
+      handshakeTimeoutMs: Number(env.IYZIPAY_HANDSHAKE_TIMEOUT_MS ?? 10_000),
+      // iyzico ~10 dk sessizlikten sonra ilk bağlantıyı düşürüyor; 4 dk'da bir ısıtmak yeterli.
+      keepWarmIntervalMs: Number(env.IYZIPAY_KEEP_WARM_MS ?? 4 * 60_000),
     },
   };
 }

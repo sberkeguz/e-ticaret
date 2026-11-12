@@ -18,6 +18,7 @@ import {
   ProviderNotReachedError,
 } from "../provider/iyzico.gateway.js";
 import { BackgroundWork } from "./background-work.js";
+import { money, moneyText, sumMoney } from "../money.js";
 import { requestFingerprint } from "./request-fingerprint.js";
 
 export interface StartResult {
@@ -72,7 +73,7 @@ export class PaymentAttemptService {
         orderId: request.orderId,
         idempotencyKey,
         requestHash: fingerprint,
-        amount: request.amount.toFixed(2),
+        amount: moneyText(request.amount),
         threeDS: request.threeDS,
         traceId,
       });
@@ -304,8 +305,8 @@ export class PaymentAttemptService {
   }
 
   /** IyzicoService'ten önce alınmış ödemeler için: denemesi olmayan iyzico ödemesini iade eder. */
-  async refundLegacy(iyzicoPaymentId: string, amount: number, clientIp: string, orderId: number): Promise<void> {
-    await this.refundAtProvider(iyzicoPaymentId, amount.toFixed(2), clientIp, String(orderId));
+  async refundLegacy(iyzicoPaymentId: string, amount: string, clientIp: string, orderId: number): Promise<void> {
+    await this.refundAtProvider(iyzicoPaymentId, moneyText(amount), clientIp, String(orderId));
     this.log.log(`Eski ödeme ${iyzicoPaymentId} (sipariş ${orderId}) iade edildi`);
   }
 
@@ -370,7 +371,7 @@ export function toView(attempt: PaymentAttempt, threeDSHtmlContent: string | nul
     attemptId: attempt.id,
     orderId: Number(attempt.orderId),
     status: attempt.status,
-    amount: attempt.amount.toNumber(),
+    amount: attempt.amount.toFixed(2),
     currency: attempt.currency,
     threeDS: attempt.threeDS,
     iyzicoPaymentId: attempt.iyzicoPaymentId,
@@ -397,9 +398,8 @@ function expectedOf(attempt: PaymentAttempt): Expected {
 }
 
 function requireBasketMatchesAmount(request: CreatePaymentRequest): void {
-  const cents = (value: number) => Math.round(value * 100);
-  const sum = request.items.reduce((total, item) => total + cents(item.price), 0);
-  if (sum !== cents(request.amount)) {
+  const sum = sumMoney(request.items.map((item) => item.price));
+  if (!sum.equals(money(request.amount))) {
     throw ApiProblem.basketTotalMismatch();
   }
 }

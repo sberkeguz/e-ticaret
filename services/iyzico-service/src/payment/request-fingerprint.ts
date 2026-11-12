@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CreatePaymentRequest } from "../api/payment.dto.js";
+import { moneyText } from "../money.js";
 
 /**
  * Aynı Idempotency-Key ile gelen isteğin gerçekten aynı istek olup olmadığını anlamak için özet.
@@ -17,6 +18,6 @@ export function requestFingerprint(request: CreatePaymentRequest): string {
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-function plain(value: number): string {
-  return String(Number(value.toFixed(2)));
+function plain(value: string): string {
+  return moneyText(value);
 }

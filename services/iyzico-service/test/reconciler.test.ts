@@ -47,6 +47,12 @@ describe("mutabakat işi", () => {
     expect(await statusOf(id)).toBe("SUCCEEDED");
     // Önce "belirsiz" (backend siparişi incelemeye alır), sonra "başarılı" (ödendi yapar).
     expect(await eventTypes(id)).toEqual(["PaymentVerifying", "PaymentSucceeded"]);
+    // Sıra numarası artar: dinleyici "doğrulanıyor"u "başarılı"dan sonra görse bile eski olduğunu anlar.
+    const sequences = (await db.outboxMessage.findMany({ orderBy: { createdAt: "asc" } }))
+      .map((row) => row.payload as unknown as PaymentEvent)
+      .filter((event) => event.data.attemptId === id)
+      .map((event) => event.sequence);
+    expect(sequences[0]).toBeLessThan(sequences[1]);
   });
 
   it("SMS sonrası cevabı kaybolan 3D ödeme (CONFIRM_SENT) de sorulur", async () => {

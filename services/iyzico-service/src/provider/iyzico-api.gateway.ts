@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CreatePaymentRequest, ThreeDSCallback } from "../api/payment.dto.js";
 import { APP_CONFIG, type AppConfig } from "../config.js";
+import { money, moneyText } from "../money.js";
 import { IyzicoHttpClient, type IyzicoResponse } from "./iyzico-http.client.js";
 import {
   type ChargeOutcome,
@@ -22,9 +23,9 @@ export class IyzicoApiGateway extends IyzicoGateway {
 
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {
     super();
-    const { baseUrl, apiKey, secretKey, timeoutMs } = config.iyzico;
+    const { baseUrl, apiKey, secretKey, timeoutMs, handshakeTimeoutMs } = config.iyzico;
     this.secretKey = secretKey;
-    this.http = new IyzicoHttpClient(baseUrl, apiKey, secretKey, timeoutMs);
+    this.http = new IyzicoHttpClient(baseUrl, apiKey, secretKey, timeoutMs, handshakeTimeoutMs);
   }
 
   isConfigured(): boolean {
@@ -209,26 +210,26 @@ function paymentBody(attemptId: string, request: CreatePaymentRequest) {
 }
 
 function matches(result: IyzicoResponse, expected: Expected): boolean {
-  const price = Number(result.price);
-  const paidPrice = Number(result.paidPrice);
-  const amount = Number(expected.amount);
+  if (result.price == null || result.paidPrice == null) {
+    return false;
+  }
+  const amount = money(expected.amount);
   return (
     str(result.basketId) === String(expected.orderId) &&
     str(result.conversationId) === expected.attemptId &&
     str(result.currency) === "TRY" &&
-    Number.isFinite(price) &&
-    Math.round(price * 100) === Math.round(amount * 100) &&
-    Math.round(paidPrice * 100) === Math.round(amount * 100)
+    money(String(result.price)).equals(amount) &&
+    money(String(result.paidPrice)).equals(amount)
   );
 }
 
 function expectedOf(attemptId: string, request: CreatePaymentRequest): Expected {
-  return { attemptId, orderId: request.orderId, amount: request.amount.toFixed(2) };
+  return { attemptId, orderId: request.orderId, amount: moneyText(request.amount) };
 }
 
 /** iyzico'nun beklediği fiyat biçimi (resmî SDK ile aynı): 12.5 → "12.5", 5 → "5.0" */
 export function formatPrice(value: number | string): string {
-  const text = parseFloat(String(value)).toString();
+  const text = money(value).toFixed(); // sondaki sıfırlar atılır: "12.50" → "12.5"
   return text.includes(".") ? text : `${text}.0`;
 }
 

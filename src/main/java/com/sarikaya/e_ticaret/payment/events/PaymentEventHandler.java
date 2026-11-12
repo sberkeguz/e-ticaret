@@ -91,6 +91,14 @@ public class PaymentEventHandler {
 
         Payment payment = found.get();
         boolean sameAttempt = data.attemptId().equals(payment.getAttemptId());
+        if (sameAttempt && isOlderThanApplied(event, payment)) {
+            log.info("Sipariş {} için eski olay (sıra {} ≤ {}) atlandı", data.orderId(), event.sequence(), payment.getLastEventSequence());
+            return;
+        }
+        if (event.sequence() != null) {
+            payment.setLastEventSequence(Math.max(event.sequence(),
+                    payment.getLastEventSequence() == null ? 0 : payment.getLastEventSequence()));
+        }
         switch (payment.getStatus()) {
             case "PENDING" -> {
                 // Cevap kaybolmuş ya da asenkron ödeme: olay sayesinde sipariş tamamlanıyor.
@@ -117,6 +125,12 @@ public class PaymentEventHandler {
             default -> refunder.refund(data, PaymentAlert.Kind.LATE_PAYMENT,
                     "Sipariş " + data.orderId() + " " + payment.getStatus() + " durumundayken ödeme geldi.");
         }
+    }
+
+    /** Olayların sırası karışırsa (paralel dinleyiciler) eskisi yenisinin üzerine yazılmasın. */
+    private static boolean isOlderThanApplied(PaymentEvent event, Payment payment) {
+        return event.sequence() != null && payment.getLastEventSequence() != null
+                && event.sequence() <= payment.getLastEventSequence();
     }
 
     private boolean isYoungerThan(PaymentEvent event, Duration age) {

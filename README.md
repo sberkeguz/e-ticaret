@@ -40,6 +40,17 @@ Tarayıcı → Backend (8080) → IyzicoService (8081) → iyzico
 - iyzico'dan cevap gelmezse istek tekrar gönderilmez; deneme `VERIFYING` olur ve iyzico'ya sorulur.
 - 3D Secure dönüşü yalnızca bir kez işlenir.
 
+### Veritabanı kullanıcıları
+
+Her servis yalnızca kendi şemasına erişir: backend `backend_app` (public), iyzico-service `iyzico_app` (iyzico).
+`POSTGRES_USER` (eticaret_user) süper kullanıcıdır, yalnızca yönetim (pgAdmin) içindir.
+Boş veritabanında kullanıcılar otomatik kurulur. Var olan bir veritabanına uygulamak için (tekrar çalıştırılabilir):
+
+```bash
+docker compose cp docker/postgres/service-roles.sql postgres:/tmp/service-roles.sql
+docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_password=... -v iyzico_password=... -f /tmp/service-roles.sql
+```
+
 ### Ödeme akışı
 
 - **2D (3D Secure'suz):** Asenkron. Backend kartı IyzicoService'e senkron HTTP ile gönderir (`Prefer: respond-async`); servis denemeyi kartsız kaydedip hemen `202 Accepted` döner ve iyzico'yu arka planda çağırır. Tarayıcı "Ödemeniz işleniyor…" gösterir ve `GET /api/payments/orders/{id}/status` ile sonucu sorar. Sonuç RabbitMQ olayıyla siparişe işlenir; olay gecikirse durum sorgusu servise doğrudan bakar.
@@ -48,6 +59,7 @@ Tarayıcı → Backend (8080) → IyzicoService (8081) → iyzico
 ### Mutabakat ve fazla ödemeler
 
 - **Mutabakat işi** (iyzico-service, dakikada bir): takılan denemeleri sonuca bağlar. İstek hiç gitmediyse başarısız sayar, cevabı kaybolduysa iyzico'ya sorar (tekrar göndermez), 15 dakikadır bekleyen 3D ekranını kapatır.
+- **Bağlantı ısıtma** (iyzico-service, 4 dakikada bir): iyzico sandbox ~10 dakika sessizlikten sonra ilk bağlantıyı ~3 sn bekletip düşürüyor. Servis iyzico'ya küçük bir `HEAD /` isteği atarak bu cezayı ödeme yerine kendisi yer. Para ve kayıtla ilgisi yoktur. Aralık `IYZIPAY_KEEP_WARM_MS` ile değişir (0 = kapalı).
 - **Otomatik iade** (backend): aynı siparişe ikinci ödeme, iptal/süresi dolmuş siparişe geç ödeme ya da siparişi olmayan ödeme gelirse iade edilir ve admin panelindeki "Ödeme uyarıları" kartına düşer.
 
 ### Olaylar (RabbitMQ)

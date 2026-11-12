@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -7,16 +7,15 @@ import {
   IsEmail,
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsPositive,
   IsString,
   Matches,
   MaxLength,
-  Min,
   ValidateNested,
 } from "class-validator";
 import type { AttemptStatus } from "../attempt/attempt-status.js";
+import { POSITIVE_MONEY, toMoneyText } from "../money.js";
 
 export class BuyerDto {
   @IsString() @IsNotEmpty() @MaxLength(50) id!: string;
@@ -40,7 +39,8 @@ export class AddressDto {
 export class BasketItemDto {
   @IsString() @IsNotEmpty() @MaxLength(50) id!: string;
   @IsString() @IsNotEmpty() @MaxLength(200) name!: string;
-  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) price!: number;
+  @ApiProperty({ example: "12.50", description: "Metin olarak ondalık tutar" })
+  @Transform(toMoneyText) @Matches(POSITIVE_MONEY, { message: "price geçersiz tutar" }) price!: string;
 }
 
 /** Kart bilgisi yalnızca bellekte yaşar: iyzico'ya iletilir, yazılmaz, loglanmaz. */
@@ -59,7 +59,8 @@ export class CardDto {
 /** Backend'in ödeme başlatma isteği. */
 export class CreatePaymentRequest {
   @IsInt() @IsPositive() orderId!: number;
-  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) amount!: number;
+  @ApiProperty({ example: "25.00", description: "Metin olarak ondalık tutar (float değil)" })
+  @Transform(toMoneyText) @Matches(POSITIVE_MONEY, { message: "amount geçersiz tutar" }) amount!: string;
   @ApiPropertyOptional({ description: "true: 3D Secure (SMS) ile öde" })
   @IsOptional() @IsBoolean() threeDS: boolean = false;
   @IsString() @IsNotEmpty() @MaxLength(45) clientIp!: string;
@@ -85,7 +86,7 @@ export class RefundRequest {
 
 export class LegacyRefundRequest {
   @IsString() @IsNotEmpty() @MaxLength(50) iyzicoPaymentId!: string;
-  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) amount!: number;
+  @Transform(toMoneyText) @Matches(POSITIVE_MONEY, { message: "amount geçersiz tutar" }) amount!: string;
   @IsString() @IsNotEmpty() @MaxLength(45) clientIp!: string;
   @IsInt() @IsPositive() orderId!: number;
 }
@@ -96,7 +97,8 @@ export class PaymentAttemptView {
   orderId!: number;
   @ApiProperty({ enum: ["CREATED", "SENT", "AWAITING_3DS", "CONFIRM_SENT", "SUCCEEDED", "FAILED", "VERIFYING", "REFUNDED"] })
   status!: AttemptStatus;
-  amount!: number;
+  /** "25.00" gibi metin */
+  amount!: string;
   currency!: string;
   threeDS!: boolean;
   iyzicoPaymentId!: string | null;

@@ -13,6 +13,20 @@ import { FakeIyzicoGateway } from "./fake-iyzico.gateway.js";
 
 export const TOKEN = "test-token";
 
+/** Testlerde zamanlanmış işler kapalı (gerekirse test açar); iyzico'ya gerçek istek gitmez. */
+function testConfig(overrides: Partial<AppConfig>): AppConfig {
+  const base = loadConfig({});
+  return {
+    ...base,
+    databaseUrl: inject("databaseUrl"),
+    internalApiToken: TOKEN,
+    reconcileIntervalMs: 0,
+    cleanupIntervalMs: 0,
+    iyzico: { ...base.iyzico, keepWarmIntervalMs: 0 },
+    ...overrides,
+  };
+}
+
 /** Gerçek Postgres (Testcontainers) + sahte iyzico ile tam uygulama. */
 export async function createTestApp(
   overrides: Partial<AppConfig> = {},
@@ -20,7 +34,7 @@ export async function createTestApp(
   const iyzico = new FakeIyzicoGateway();
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(APP_CONFIG)
-    .useValue({ ...loadConfig({}), databaseUrl: inject("databaseUrl"), internalApiToken: TOKEN, reconcileIntervalMs: 0, ...overrides })
+    .useValue(testConfig(overrides))
     .overrideProvider(IyzicoGateway)
     .useValue(iyzico)
     .compile();

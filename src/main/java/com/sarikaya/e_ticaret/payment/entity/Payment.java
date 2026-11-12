@@ -31,6 +31,9 @@ public class Payment {
     @Column(unique = true)
     private UUID attemptId;
 
+    /** Bu ödemeye uygulanan son olayın sıra numarası; daha eski olaylar uygulanmaz. */
+    private Long lastEventSequence;
+
     @Column(nullable = false, length = 30)
     private String status = "PENDING";
 
