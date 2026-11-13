@@ -75,7 +75,9 @@
         # İzleme: izler ve ölçümler Grafana'ya (lgtm) gider.
         OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
         OTEL_SERVICE_NAME: iyzico-service
-        OTEL_LOGS_EXPORTER: none
+        OTEL_LOGS_EXPORTER: otlp
+        # Konsol logu JSON; her satır OpenTelemetry ile Grafana'ya (Loki) da gider.
+        LOG_FORMAT: json
         OTEL_METRIC_EXPORT_INTERVAL: "15000"
       ports:
         # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, Swagger UI).
@@ -107,6 +109,10 @@
         OTEL_ENABLED: "true"
         OTEL_TRACES_ENDPOINT: http://lgtm:4318/v1/traces
         OTEL_METRICS_ENDPOINT: http://lgtm:4318/v1/metrics
+        OTEL_LOGS_ENDPOINT: http://lgtm:4318/v1/logs
+        # Konsol logu JSON (Elastic Common Schema): makinenin okuyacağı, izleme numarası içeren biçim.
+        SPRING_PROFILES_ACTIVE: json-logs
+        LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
         RABBITMQ_USER: ${RABBITMQ_USER:-eticaret}
         RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}
         INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
@@ -120,6 +126,12 @@
           condition: service_healthy
         rabbitmq:
           condition: service_healthy
+      healthcheck:
+        test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1" ]
+        interval: 5s
+        timeout: 5s
+        retries: 30
+        start_period: 20s
 
     frontend:
       build:
@@ -128,7 +140,8 @@
       ports:
         - "3000:80"
       depends_on:
-        - backend
+        backend:
+          condition: service_healthy
 
     # Grafana + Tempo (izler) + Prometheus (ölçümler) + Loki tek konteynerde. Yalnızca yerel geliştirme için.
     # Grafana: http://localhost:3001 (giriş gerekmez). Servisler OTLP ile 4318'e gönderir.
@@ -147,6 +160,7 @@
         - lgtm_data:/data
         - ./docker/grafana/dashboards:/otel-lgtm/dashboards/e-ticaret:ro
         - ./docker/grafana/provisioning/e-ticaret-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/e-ticaret.yaml:ro
+        - ./docker/grafana/provisioning/e-ticaret-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/e-ticaret.yaml:ro
 
   volumes:
     postgres_data:

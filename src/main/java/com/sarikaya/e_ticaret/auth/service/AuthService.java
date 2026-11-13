@@ -86,14 +86,20 @@ public class AuthService {
                 .build());
 
         var jwtToken = jwtService.generateToken(user);
+        return new Object[]{responseFor(user), jwtToken, user.getId()};
+    }
 
-        AuthResponse response = AuthResponse.builder()
+    /** Giriş ve oturum yenileme cevabı (token başlıkta, rol ve kullanıcı adı gövdede). */
+    public AuthResponse responseFor(User user) {
+        return AuthResponse.builder()
                 .status("success")
                 .role(user.getRole().name())
                 .message(user.getRole() == Role.ADMIN ? "admin girişi" : "kullanıcı girişi")
                 .username(user.getUsername())
                 .build();
+    }
 
-        return new Object[]{response, jwtToken};
+    public String accessTokenFor(User user) {
+        return jwtService.generateToken(user);
     }
 }

@@ -20,13 +20,17 @@ public class JwtService {
     @Value("${jwt.secret}")
     private String secretKey;
 
+    /** Erişim token'ı kısa ömürlü: süresi dolunca tarayıcı yenileme çereziyle yenisini alır. */
+    @Value("${auth.access-token-minutes:15}")
+    private long accessTokenMinutes = 15;
+
     // Token üretir
     public String generateToken(UserDetails userDetails) {
         return Jwts.builder()
                 .setClaims(new HashMap<>())                      // ek bilgi (şimdilik boş)
                 .setSubject(userDetails.getUsername())           // token'ın sahibi
                 .setIssuedAt(new Date(System.currentTimeMillis())) // üretilme zamanı
-                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24)) // 24 saat
+                .setExpiration(new Date(System.currentTimeMillis() + accessTokenMinutes * 60_000)) // varsayılan 15 dk
                 .signWith(getSignInKey(), SignatureAlgorithm.HS256) // HS256 ile imzala
                 .compact();
     }

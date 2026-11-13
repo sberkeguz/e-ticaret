@@ -60,6 +60,10 @@ public class SecurityConfig {
                         // Bekletmeli cevabın (ör. ödeme sonucu) ikinci geçişi: isteğin kendisi ilk geçişte
                         // zaten doğrulandı; JWT filtresi bu geçişte çalışmadığı için burada tekrar sorulmaz.
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
+                        // Sağlık kontrolü (Docker bunu sorar). Yalnızca UP/DOWN döner, ayrıntı vermez.
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // API dokümanı (Swagger UI). Yalnızca doküman; uçların kendisi yine yetki ister.
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // Login, register ve hata sayfası herkese açık
                         .requestMatchers("/api/auth/**", "/api/user/**", "/api/payments/callback", "/error").permitAll()
                         // Admin endpoint'leri sadece ADMIN rolüne açık

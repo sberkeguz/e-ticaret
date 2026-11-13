@@ -1,0 +1,154 @@
+apiVersion: 1
+
+# Ödeme akışı uyarıları. Grafana > Alerting > Alert rules altında görünür (dakikada bir değerlendirilir).
+# Bildirim kanalı (e-posta, Slack...) tanımlı değil: şimdilik yalnızca Grafana'da "Firing" olarak görünür.
+groups:
+  - orgId: 1
+    name: Ödeme akışı
+    folder: E-ticaret
+    interval: 1m
+    rules:
+      - uid: eticaret-iyzico-baglanti
+        title: iyzico'ya bağlantı düşüyor
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: Son 10 dakikada iyzico'ya 2'den fazla bağlantı düştü.
+          description: Servis bunları otomatik tekrar dener ama ödemeler yavaşlar. Isıtma (IYZIPAY_KEEP_WARM_MS) çalışıyor mu, iyzico'da sorun var mı bakın.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(http_client_request_duration_seconds_count{job="iyzico-service", server_address="sandbox-api.iyzipay.com", error_type!=""}[10m])) or vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 2 ] } } ]
+
+      - uid: eticaret-sunucu-hatasi
+        title: Sunucu hatası oranı yüksek
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Backend isteklerinin %5'inden fazlası 5 dakikadır 5xx ile bitiyor.
+          description: Grafana > Explore > Loki'de seviyesi ERROR olan backend loglarına bakın.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: (sum(rate(http_server_requests_milliseconds_count{job="e-ticaret", outcome="SERVER_ERROR"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_requests_milliseconds_count{job="e-ticaret"}[5m])), 1e-9)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0.05 ] } } ]
+
+      - uid: eticaret-odeme-yavas
+        title: Ödeme isteği yavaş
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: Ödeme isteklerinin p95 süresi 5 dakikadır 3 saniyenin üstünde.
+          description: Grafana'daki "Ödeme akışı" panosunda son ödeme izlerine bakın; hangi adımın beklediği orada görünür.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_milliseconds_bucket{job="e-ticaret", uri="/api/payments/checkout"}[10m])))
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 3000 ] } } ]
+
+      - uid: eticaret-dlq
+        title: İşlenemeyen ödeme olayı var (DLQ)
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Bir veya daha fazla ödeme olayı 3 denemede işlenemedi ve DLQ'da bekliyor.
+          description: Admin paneli > "İşlenemeyen ödeme olayları" kartından inceleyip tekrar işletin veya silin.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(payment_events_dead_letters{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      - uid: eticaret-odeme-uyarisi
+        title: Kapatılmamış ödeme uyarısı var
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: Fazla, geç veya sahipsiz bir ödeme otomatik iade edildi; admin henüz incelemedi.
+          description: Admin paneli > "Ödeme uyarıları" kartından inceleyip kapatın.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(payment_alerts_open{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]

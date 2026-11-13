@@ -8,6 +8,8 @@ import java.util.UUID;
 public interface PaymentAlertRepository extends JpaRepository<PaymentAlert, Long> {
     List<PaymentAlert> findTop50ByResolvedAtIsNullOrderByCreatedAtDesc();
 
+    long countByResolvedAtIsNull();
+
     List<PaymentAlert> findTop50ByOrderByCreatedAtDesc();
 
     boolean existsByAttemptId(UUID attemptId);

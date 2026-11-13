@@ -1,6 +1,6 @@
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { clearSessionStorage, getFavorites, moveFavorites, toggleFavorite } from "./favorites.js";
+import { clearSessionStorage, getFavorites, moveFavorites, toggleFavorite } from "./favorites.ts";
 
 class Storage {
     data = new Map();

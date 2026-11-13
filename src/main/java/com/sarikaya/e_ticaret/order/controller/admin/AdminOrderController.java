@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.order.controller.admin;
 
+import com.sarikaya.e_ticaret.order.dto.OrderPageResponse;
 import com.sarikaya.e_ticaret.order.dto.OrderResponse;
 import com.sarikaya.e_ticaret.order.dto.OrderStatsResponse;
 import com.sarikaya.e_ticaret.order.service.AdminOrderStatusService;
@@ -32,9 +33,13 @@ public class AdminOrderController {
         return orderStatsService.stats();
     }
 
+    /** Siparişler, en yeniler önce. q: kullanıcı adı, ad, soyad, telefon veya ürün adında arar. */
     @GetMapping
-    public List<OrderResponse> listOrders() {
-        return orderService.findAll();
+    public OrderPageResponse listOrders(@RequestParam(defaultValue = "0") int page,
+                                        @RequestParam(defaultValue = "50") int size,
+                                        @RequestParam(defaultValue = "") String q,
+                                        @RequestParam(defaultValue = "") String user) {
+        return orderService.findPage(page, size, q, user);
     }
 
     @PatchMapping("/{id}/status")

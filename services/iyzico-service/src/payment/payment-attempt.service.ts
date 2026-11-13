@@ -177,6 +177,10 @@ export class PaymentAttemptService {
   async completeThreeDS(id: string, callback: ThreeDSCallback): Promise<PaymentAttemptView> {
     const attempt = await this.store.get(id);
     if (callback.conversationId !== id || !attempt.iyzicoPaymentId || attempt.iyzicoPaymentId !== callback.paymentId) {
+      this.log.warn(
+        `3D dönüşü eşleşmedi: deneme ${id} (iyzico ${attempt.iyzicoPaymentId ?? "-"}), ` +
+          `gelen conversationId=${callback.conversationId ?? "-"} paymentId=${callback.paymentId ?? "-"} status=${callback.status ?? "-"}`,
+      );
       throw ApiProblem.callbackRejected("Dönüş bu ödeme denemesiyle eşleşmiyor.");
     }
     if (!callback.signature) {

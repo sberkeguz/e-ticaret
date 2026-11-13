@@ -5,6 +5,7 @@ import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.dto.OrderRequest;
 import com.sarikaya.e_ticaret.order.dto.OrderResponse;
 import com.sarikaya.e_ticaret.order.entity.Order;
+import com.sarikaya.e_ticaret.order.dto.OrderPageResponse;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
 import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
@@ -12,6 +13,8 @@ import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
 import com.sarikaya.e_ticaret.user.entity.User;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,6 +77,19 @@ public class OrderService {
     public List<OrderResponse> findAll() {
         return orders.findAllByOrderByCreatedAtDesc().stream().map(this::toResponse).toList();
     }
+
+    /** Admin sipariş listesi, sayfa sayfa (en fazla 100'er). */
+    @Transactional(readOnly = true)
+    public OrderPageResponse findPage(int page, int size, String query, String username) {
+        int safeSize = Math.clamp(size, 1, MAX_PAGE_SIZE);
+        String like = "%" + (query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT)) + "%";
+        Page<Order> found = orders.searchForAdmin(username == null ? "" : username.trim(), like,
+                PageRequest.of(Math.max(page, 0), safeSize));
+        return new OrderPageResponse(found.getContent().stream().map(this::toResponse).toList(),
+                found.getNumber(), found.getSize(), found.getTotalElements(), found.getTotalPages());
+    }
+
+    private static final int MAX_PAGE_SIZE = 100;
 
     private OrderResponse toResponse(Order o) {
         return new OrderResponse(o.getId(), o.getUser().getUsername(), o.getFirstName(), o.getLastName(),

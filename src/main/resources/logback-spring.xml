@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Spring Boot'un konsol logu + OpenTelemetry ekleyicisi (loglar Grafana'daki Loki'ye gider).
+  Konsol: "json-logs" profili açıksa JSON (Docker'da; biçim LOGGING_STRUCTURED_FORMAT_CONSOLE, ör. ecs),
+  değilse okunur metin (yerel geliştirme, testler).
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProfile name="json-logs">
+        <include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+    </springProfile>
+    <springProfile name="!json-logs">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    </springProfile>
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender"/>
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="OTEL"/>
+    </root>
+</configuration>
