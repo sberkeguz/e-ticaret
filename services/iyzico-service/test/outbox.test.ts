@@ -97,6 +97,8 @@ describe("outbox", () => {
     expect(message.properties.messageId).toBe(row.id);
     expect(message.properties.type).toBe("PaymentSucceeded");
     expect(message.properties.deliveryMode).toBe(2);
+    // Olay, ödemeyi başlatan isteğin izine bağlı (backend dinleyicisi aynı traceId ile devam eder).
+    expect(message.properties.headers?.traceparent).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
     expect(JSON.parse(message.content.toString()).data.attemptId).toBe(paid.attemptId);
   });
 

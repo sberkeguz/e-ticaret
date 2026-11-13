@@ -18,7 +18,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
@@ -77,7 +77,7 @@ public class AuthService {
         var user = userRepository.findByUsername(request.getUsername()).orElseThrow();
 
         // Hem son giriş bilgisini hem de yalnızca zaman içeren giriş geçmişini sakla.
-        LocalDateTime now = LocalDateTime.now();
+        Instant now = Instant.now();
         user.setLastLoginAt(now);
         userRepository.save(user);
         loginHistoryRepository.save(LoginHistory.builder()

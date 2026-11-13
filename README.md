@@ -15,6 +15,7 @@ Uygulama adresleri:
 - IyzicoService: http://localhost:8081 (yalnızca bu bilgisayardan; API belgesi: `/swagger-ui`)
 - PostgreSQL: `localhost:5432` (`eticaret` veritabanı)
 - RabbitMQ yönetim arayüzü: http://localhost:15672 (kullanıcı `eticaret`; işlenemeyen mesajlar `backend.payment-events.dlq` kuyruğunda)
+- Grafana (izleme): http://localhost:3001 → *Dashboards › E-ticaret › Ödeme akışı* (giriş gerekmez, yalnızca bu bilgisayardan)
 
 Veritabanı verileri `postgres_data` adlı Docker volume'unda saklanır. Servisleri durdurmak için `Ctrl+C`, arka planda başlatılan servisleri kaldırmak için `docker compose down` kullanın. Veritabanı verilerini de silmek isterseniz `docker compose down -v` çalıştırın.
 
@@ -59,7 +60,7 @@ docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_passwo
 ### Mutabakat ve fazla ödemeler
 
 - **Mutabakat işi** (iyzico-service, dakikada bir): takılan denemeleri sonuca bağlar. İstek hiç gitmediyse başarısız sayar, cevabı kaybolduysa iyzico'ya sorar (tekrar göndermez), 15 dakikadır bekleyen 3D ekranını kapatır.
-- **Bağlantı ısıtma** (iyzico-service, 4 dakikada bir): iyzico sandbox ~10 dakika sessizlikten sonra ilk bağlantıyı ~3 sn bekletip düşürüyor. Servis iyzico'ya küçük bir `HEAD /` isteği atarak bu cezayı ödeme yerine kendisi yer. Para ve kayıtla ilgisi yoktur. Aralık `IYZIPAY_KEEP_WARM_MS` ile değişir (0 = kapalı).
+- **Bağlantı ısıtma** (iyzico-service, dakikada bir): iyzico sandbox birkaç dakika sessizlikten sonra (4 dakika bile yetiyor) ilk bağlantıyı ~3 sn bekletip düşürüyor. Servis iyzico'ya küçük bir `HEAD /` isteği atar; düşerse hemen tekrar dener, böylece cezayı ödeme yerine kendisi yer. Para ve kayıtla ilgisi yoktur. Aralık `IYZIPAY_KEEP_WARM_MS` ile değişir (0 = kapalı).
 - **Otomatik iade** (backend): aynı siparişe ikinci ödeme, iptal/süresi dolmuş siparişe geç ödeme ya da siparişi olmayan ödeme gelirse iade edilir ve admin panelindeki "Ödeme uyarıları" kartına düşer.
 
 ### Olaylar (RabbitMQ)
@@ -78,3 +79,11 @@ IyzicoService'in testleri Testcontainers ile gerçek Postgres kullanır (Docker 
 ```powershell
 cd services/iyzico-service; npm install; npm test
 ```
+
+### İzleme (OpenTelemetry + Grafana)
+
+- Her istek bir **iz (trace)** açar. Backend'in iyzico-service çağrısı, iyzico-service'in veritabanı sorguları ve iyzico API çağrıları, RabbitMQ olayı ve backend'in olayı işlemesi aynı izde görünür (W3C `traceparent` başlığı). Olay geç yayınlansa bile (outbox) ödemenin izine bağlanır.
+- **Ölçümler:** istek süreleri (p50/p95), iyzico çağrı süreleri, düşen bağlantılar, hata oranı ve RabbitMQ akışı Prometheus'a gider.
+- Hepsi OTLP ile `lgtm` konteynerine gider (Grafana + Tempo + Prometheus). Pano dosyası: `docker/grafana/dashboards/odeme-akisi.json`.
+- Adres verilmezse (testler, Docker'sız çalıştırma) hiçbir şey gönderilmez: backend'de `OTEL_ENABLED`, iyzico-service'te `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- Zamanlar her yerde UTC tutulur (`timestamptz`, API'de `...Z`); ekranda tarayıcının saat dilimine çevrilir.

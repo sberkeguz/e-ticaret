@@ -6,7 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
@@ -34,9 +34,10 @@ public class Payment {
     /** Bu ödemeye uygulanan son olayın sıra numarası; daha eski olaylar uygulanmaz. */
     private Long lastEventSequence;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
-    private String status = "PENDING";
+    private PaymentStatus status = PaymentStatus.PENDING;
 
     @Column(nullable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private Instant createdAt = Instant.now();
 }

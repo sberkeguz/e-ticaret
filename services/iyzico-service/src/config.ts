@@ -50,8 +50,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       // 3 deneme de düştü ve ödeme başarısız oldu. Kopmalar ~3,5 sn'de kendiliğinden geliyor;
       // bu süre yalnızca hiç cevap gelmeyen bağlantının sonsuza dek beklemesini önler.
       handshakeTimeoutMs: Number(env.IYZIPAY_HANDSHAKE_TIMEOUT_MS ?? 10_000),
-      // iyzico ~10 dk sessizlikten sonra ilk bağlantıyı düşürüyor; 4 dk'da bir ısıtmak yeterli.
-      keepWarmIntervalMs: Number(env.IYZIPAY_KEEP_WARM_MS ?? 4 * 60_000),
+      // iyzico birkaç dk sessizlikten sonra ilk bağlantıyı düşürüyor (4 dk bile yetiyor); dakikada bir ısıtılır.
+      keepWarmIntervalMs: Number(env.IYZIPAY_KEEP_WARM_MS ?? 60_000),
     },
   };
 }

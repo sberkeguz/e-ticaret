@@ -6,6 +6,7 @@ import com.sarikaya.e_ticaret.exception.PaymentServiceUnavailableException;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
 import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient;
 import com.sarikaya.e_ticaret.payment.client.IyzicoServiceClient.AttemptResult;
@@ -15,6 +16,7 @@ import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
 import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
@@ -26,7 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,12 +48,12 @@ import java.util.regex.Pattern;
 @Service
 public class PaymentService {
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
-    private static final String PENDING = "PENDING";
-    private static final String PAID = "PAID";
-    private static final String REVIEW = "REVIEW";
-    private static final String CANCELLED = "CANCELLED";
-    private static final String REFUNDED = "REFUNDED";
-    private static final String ORDER_CANCELLED = "İptal edildi";
+    private static final PaymentStatus PENDING = PaymentStatus.PENDING;
+    private static final PaymentStatus PAID = PaymentStatus.PAID;
+    private static final PaymentStatus REVIEW = PaymentStatus.REVIEW;
+    private static final PaymentStatus CANCELLED = PaymentStatus.CANCELLED;
+    private static final PaymentStatus REFUNDED = PaymentStatus.REFUNDED;
+    private static final OrderStatus ORDER_CANCELLED = OrderStatus.CANCELLED;
     private static final int RESERVATION_MINUTES = 2;
     /** Para çekme isteğinin iyzico'da sürdüğü ya da sonucunun belirsiz olduğu durumlar. */
     private static final Set<String> IN_FLIGHT_AT_PROVIDER = Set.of("CREATED", "SENT", "CONFIRM_SENT", "VERIFYING");
@@ -110,7 +113,7 @@ public class PaymentService {
         order.setDistrict(request.district().trim());
         order.setNeighborhood(request.neighborhood().trim());
         order.setAddress(request.address().trim());
-        order.setStatus("Ödeme bekliyor");
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
 
         BigDecimal total = BigDecimal.ZERO;
         for (Map.Entry<Long, Integer> entry : quantitiesByProduct.entrySet()) {
@@ -198,7 +201,7 @@ public class PaymentService {
         }
 
         Payment payment = foundPayment.get();
-        String paymentStatus = payment.getStatus();
+        PaymentStatus paymentStatus = payment.getStatus();
         boolean moneyWasTaken = PAID.equals(paymentStatus) || REVIEW.equals(paymentStatus);
         boolean paymentIsPending = PENDING.equals(paymentStatus);
 
@@ -355,7 +358,7 @@ public class PaymentService {
     public int expireReservations() {
         List<Payment> candidates = payments
                 .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
-                        PENDING, LocalDateTime.now().minusMinutes(RESERVATION_MINUTES));
+                        PENDING, Instant.now().minus(Duration.ofMinutes(RESERVATION_MINUTES)));
         int expired = 0;
         for (Payment payment : candidates) {
             Order order = payment.getOrder();
@@ -370,8 +373,8 @@ public class PaymentService {
                 continue;
             }
             releaseStock(order);
-            payment.setStatus("EXPIRED");
-            order.setStatus("Ödeme süresi doldu");
+            payment.setStatus(PaymentStatus.EXPIRED);
+            order.setStatus(OrderStatus.PAYMENT_EXPIRED);
             expired++;
         }
         return expired;
@@ -407,12 +410,12 @@ public class PaymentService {
     public void applyAttemptResult(Payment payment, Order order, String attemptStatus) {
         if ("SUCCEEDED".equals(attemptStatus)) {
             payment.setStatus(PAID);
-            order.setStatus("Hazırlanıyor");
+            order.setStatus(OrderStatus.PREPARING);
         } else {
             // Para çekilmiş olabilir ama doğrulanamadı: elle veya mutabakatla kontrol edilir.
             log.warn("Sipariş {} ödemesi doğrulanamadı, incelemeye alındı", order.getId());
             payment.setStatus(REVIEW);
-            order.setStatus("Ödeme inceleniyor");
+            order.setStatus(OrderStatus.PAYMENT_REVIEW);
         }
         users.findByIdForUpdate(order.getUser().getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
@@ -460,18 +463,18 @@ public class PaymentService {
 
     private static String statusName(Payment payment) {
         return switch (payment.getStatus()) {
-            case "PAID" -> "success";
-            case "REVIEW" -> "review";
-            case "PENDING" -> "pending";
+            case PAID -> "success";
+            case REVIEW -> "review";
+            case PENDING -> "pending";
             default -> "failed";
         };
     }
 
     private static String resultName(Payment payment) {
         return switch (payment.getStatus()) {
-            case "PAID" -> "success";
-            case "REVIEW" -> "review";
-            case "FAILED", "EXPIRED", "CANCELLED" -> "failed";
+            case PAID -> "success";
+            case REVIEW -> "review";
+            case FAILED, EXPIRED, CANCELLED -> "failed";
             default -> "pending";
         };
     }

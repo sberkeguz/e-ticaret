@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.order.service;
 
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.category.entity.Category;
 import com.sarikaya.e_ticaret.order.dto.OrderStatsResponse;
 import com.sarikaya.e_ticaret.order.entity.Order;
@@ -11,7 +12,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -51,12 +53,12 @@ class OrderStatsServiceTest {
 
     @Test
     void topProductsCountOnlyCompletedSales() {
-        addOrder("Hazırlanıyor", 1, domates, 5);
-        addOrder("Teslim edildi", 30, portakal, 9);
-        addOrder("Kargoya verildi", 2, muz, 2);
-        addOrder("İptal edildi", 1, muz, 50);
-        addOrder("Ödeme bekliyor", 1, muz, 50);
-        addOrder("Ödeme süresi doldu", 1, muz, 50);
+        addOrder(OrderStatus.PREPARING, 1, domates, 5);
+        addOrder(OrderStatus.DELIVERED, 30, portakal, 9);
+        addOrder(OrderStatus.SHIPPED, 2, muz, 2);
+        addOrder(OrderStatus.CANCELLED, 1, muz, 50);
+        addOrder(OrderStatus.PAYMENT_PENDING, 1, muz, 50);
+        addOrder(OrderStatus.PAYMENT_EXPIRED, 1, muz, 50);
 
         OrderStatsResponse stats = service.stats();
 
@@ -67,8 +69,8 @@ class OrderStatsServiceTest {
 
     @Test
     void testProductsAreLeftOutOfStatistics() {
-        addOrder("Hazırlanıyor", 1, testElma, 200);
-        addOrder("Hazırlanıyor", 1, domates, 1);
+        addOrder(OrderStatus.PREPARING, 1, testElma, 200);
+        addOrder(OrderStatus.PREPARING, 1, domates, 1);
 
         OrderStatsResponse stats = service.stats();
 
@@ -78,8 +80,8 @@ class OrderStatsServiceTest {
 
     @Test
     void categoriesAddUpProductsInThem() {
-        addOrder("Hazırlanıyor", 1, domates, 2);
-        addOrder("Hazırlanıyor", 1, portakal, 3);
+        addOrder(OrderStatus.PREPARING, 1, domates, 2);
+        addOrder(OrderStatus.PREPARING, 1, portakal, 3);
 
         OrderStatsResponse stats = service.stats();
 
@@ -89,11 +91,11 @@ class OrderStatsServiceTest {
 
     @Test
     void trendingShowsOnlyProductsSellingMoreThanLastWeek() {
-        addOrder("Hazırlanıyor", 1, domates, 5);
-        addOrder("Hazırlanıyor", 10, domates, 1);
-        addOrder("Hazırlanıyor", 2, muz, 2);
-        addOrder("Hazırlanıyor", 10, muz, 5);
-        addOrder("Hazırlanıyor", 20, portakal, 9);
+        addOrder(OrderStatus.PREPARING, 1, domates, 5);
+        addOrder(OrderStatus.PREPARING, 10, domates, 1);
+        addOrder(OrderStatus.PREPARING, 2, muz, 2);
+        addOrder(OrderStatus.PREPARING, 10, muz, 5);
+        addOrder(OrderStatus.PREPARING, 20, portakal, 9);
 
         OrderStatsResponse stats = service.stats();
 
@@ -110,11 +112,11 @@ class OrderStatsServiceTest {
         assertTrue(stats.trendingCategories().isEmpty());
     }
 
-    private void addOrder(String status, int daysAgo, Product product, int quantity) {
+    private void addOrder(OrderStatus status, int daysAgo, Product product, int quantity) {
         Order order = new Order();
         order.setId((long) orders.size() + 1);
         order.setStatus(status);
-        order.setCreatedAt(LocalDateTime.now().minusDays(daysAgo));
+        order.setCreatedAt(Instant.now().minus(Duration.ofDays(daysAgo)));
         OrderItem item = new OrderItem();
         item.setOrder(order);
         item.setProductId(product.getId());

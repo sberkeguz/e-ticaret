@@ -1,5 +1,7 @@
 package com.sarikaya.e_ticaret.order.service;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.brand.entity.Brand;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.dto.OrderDetailResponse;
@@ -39,7 +41,7 @@ class OrderDetailServiceTest {
         order.setId(5L);
         order.setUser(User.builder().id(1L).username("berke").build());
         order.setTotal(new BigDecimal("70.00"));
-        order.setStatus("Hazırlanıyor");
+        order.setStatus(OrderStatus.PREPARING);
         order.getItems().add(item(order, 10L, "Domates", "35.00", 2));
         order.getItems().add(item(order, 11L, "Silinmiş ürün", "0.00", 1));
         when(orderRepository.findById(5L)).thenReturn(Optional.of(order));
@@ -54,11 +56,11 @@ class OrderDetailServiceTest {
 
     @Test
     void ownerSeesPaidOrderWithBrandsAndTotals() {
-        when(paymentRepository.findByOrder_Id(5L)).thenReturn(Optional.of(payment("PAID")));
+        when(paymentRepository.findByOrder_Id(5L)).thenReturn(Optional.of(payment(PaymentStatus.PAID)));
 
         OrderDetailResponse detail = service.findMine("berke", 5L);
 
-        assertEquals("Ödendi", detail.paymentStatus());
+        assertEquals(PaymentStatus.PAID, detail.paymentStatus());
         assertEquals(0, new BigDecimal("70.00").compareTo(detail.paidAmount()));
         assertEquals("Antalya Sera", detail.items().get(0).brand());
         assertEquals(0, new BigDecimal("70.00").compareTo(detail.items().get(0).lineTotal()));
@@ -67,11 +69,11 @@ class OrderDetailServiceTest {
 
     @Test
     void refundedOrderShowsNothingPaid() {
-        when(paymentRepository.findByOrder_Id(5L)).thenReturn(Optional.of(payment("REFUNDED")));
+        when(paymentRepository.findByOrder_Id(5L)).thenReturn(Optional.of(payment(PaymentStatus.REFUNDED)));
 
         OrderDetailResponse detail = service.findMine("berke", 5L);
 
-        assertEquals("İade edildi", detail.paymentStatus());
+        assertEquals(PaymentStatus.REFUNDED, detail.paymentStatus());
         assertEquals(0, BigDecimal.ZERO.compareTo(detail.paidAmount()));
     }
 
@@ -79,7 +81,7 @@ class OrderDetailServiceTest {
     void orderWithoutPaymentRecordIsLabelled() {
         when(paymentRepository.findByOrder_Id(5L)).thenReturn(Optional.empty());
 
-        assertEquals("Ödeme kaydı yok", service.findMine("berke", 5L).paymentStatus());
+        assertNull(service.findMine("berke", 5L).paymentStatus());
     }
 
     @Test
@@ -97,7 +99,7 @@ class OrderDetailServiceTest {
         return item;
     }
 
-    private Payment payment(String status) {
+    private Payment payment(PaymentStatus status) {
         Payment payment = new Payment();
         payment.setStatus(status);
         return payment;

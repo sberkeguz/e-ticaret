@@ -1,14 +1,18 @@
 package com.sarikaya.e_ticaret.order.dto;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
+
+import java.time.Instant;
 import java.util.List;
 
 public record OrderDetailResponse(
         Long id,
-        LocalDateTime createdAt,
-        String orderStatus,
-        String paymentStatus,
+        Instant createdAt,
+        OrderStatus orderStatus,
+        /** Ödeme kaydı yoksa null. */
+        PaymentStatus paymentStatus,
         BigDecimal total,
         BigDecimal paidAmount,
         String firstName,

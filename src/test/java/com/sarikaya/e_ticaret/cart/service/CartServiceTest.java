@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.cart.service;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.cart.dto.CartRequest;
 import com.sarikaya.e_ticaret.cart.entity.CartItem;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
@@ -100,7 +101,7 @@ class CartServiceTest {
     void replaceCartRejectsChangesDuringPayment() {
         User user = User.builder().id(1L).username("tester").build();
         when(userRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(user));
-        when(paymentRepository.existsByOrder_User_IdAndStatusIn(1L, List.of("PENDING"))).thenReturn(true);
+        when(paymentRepository.existsByOrder_User_IdAndStatusIn(1L, List.of(PaymentStatus.PENDING))).thenReturn(true);
         assertThrows(PaymentInProgressException.class, () -> cartService.replaceCart(user, new CartRequest(List.of())));
         org.mockito.Mockito.verifyNoInteractions(cartItemRepository, productRepository);
     }

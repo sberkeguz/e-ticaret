@@ -1,5 +1,7 @@
 package com.sarikaya.e_ticaret.order.service;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
@@ -36,45 +38,45 @@ class AdminOrderStatusServiceTest {
     void setUp() {
         order = new Order();
         order.setId(10L);
-        order.setStatus("Hazırlanıyor");
+        order.setStatus(OrderStatus.PREPARING);
         when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
     }
 
     @Test
     void cancellingGoesThroughRefundBeforeStatusChange() {
-        service.changeStatus(10L, "İptal edildi", "1.2.3.4");
+        service.changeStatus(10L, "CANCELLED", "1.2.3.4");
 
         verify(paymentService).cancelByAdmin(10L, "1.2.3.4");
-        verify(orderService).updateStatus(10L, "İptal edildi");
+        verify(orderService).updateStatus(10L, OrderStatus.CANCELLED);
     }
 
     @Test
     void cancelledOrderCannotBeReopened() {
-        order.setStatus("İptal edildi");
+        order.setStatus(OrderStatus.CANCELLED);
 
         BadRequestException error = assertThrows(BadRequestException.class,
-                () -> service.changeStatus(10L, "Hazırlanıyor", "1.2.3.4"));
+                () -> service.changeStatus(10L, "PREPARING", "1.2.3.4"));
 
         assertEquals("İptal edilen sipariş yeniden açılamaz.", error.getMessage());
-        verify(orderService, never()).updateStatus(any(), anyString());
+        verify(orderService, never()).updateStatus(any(), any());
     }
 
     @Test
     void unpaidOrderCannotBeShipped() {
-        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment("PENDING")));
+        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment(PaymentStatus.PENDING)));
 
-        assertThrows(BadRequestException.class, () -> service.changeStatus(10L, "Kargoya verildi", "1.2.3.4"));
+        assertThrows(BadRequestException.class, () -> service.changeStatus(10L, "SHIPPED", "1.2.3.4"));
 
-        verify(orderService, never()).updateStatus(any(), anyString());
+        verify(orderService, never()).updateStatus(any(), any());
     }
 
     @Test
     void paidOrderCanBeShipped() {
-        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment("PAID")));
+        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment(PaymentStatus.PAID)));
 
-        service.changeStatus(10L, "Kargoya verildi", "1.2.3.4");
+        service.changeStatus(10L, "SHIPPED", "1.2.3.4");
 
-        verify(orderService).updateStatus(10L, "Kargoya verildi");
+        verify(orderService).updateStatus(10L, OrderStatus.SHIPPED);
         verify(paymentService, never()).cancelByAdmin(any(), anyString());
     }
 
@@ -82,12 +84,22 @@ class AdminOrderStatusServiceTest {
     void orderWithoutPaymentRecordCanBeShipped() {
         when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.empty());
 
-        service.changeStatus(10L, "Kargoya verildi", "1.2.3.4");
+        service.changeStatus(10L, "SHIPPED", "1.2.3.4");
 
-        verify(orderService).updateStatus(10L, "Kargoya verildi");
+        verify(orderService).updateStatus(10L, OrderStatus.SHIPPED);
     }
 
-    private Payment payment(String status) {
+    @Test
+    void unknownOrOldTurkishStatusIsRejected() {
+        // Durum artık kodla gelir; eski Türkçe yazı veya admin'in seçemeyeceği bir kod reddedilir.
+        assertThrows(BadRequestException.class, () -> service.changeStatus(10L, "Kargoya verildi", "1.2.3.4"));
+        assertThrows(BadRequestException.class, () -> service.changeStatus(10L, "PAYMENT_PENDING", "1.2.3.4"));
+        assertThrows(BadRequestException.class, () -> service.changeStatus(10L, null, "1.2.3.4"));
+
+        verify(orderService, never()).updateStatus(any(), any());
+    }
+
+    private Payment payment(PaymentStatus status) {
         Payment payment = new Payment();
         payment.setOrder(order);
         payment.setStatus(status);

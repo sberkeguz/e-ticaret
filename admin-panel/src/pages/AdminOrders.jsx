@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
-import { ORDER_STEPS, CANCELLED } from "../orderStatus";
+import { ORDER_STEPS, CANCELLED, orderStatusLabel } from "../orderStatus";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const formatDate = (value) => new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
@@ -81,7 +81,7 @@ export default function AdminOrders() {
         const base = userFilter ? orders.filter((order) => order.username === userFilter) : orders;
         if (!query) return base;
         return base.filter((order) =>
-            [order.username, order.firstName, order.lastName, order.phone, ...order.items.map((item) => item.productName)]
+            [order.username, order.firstName, order.lastName, order.phone, orderStatusLabel(order.status), ...order.items.map((item) => item.productName)]
                 .some((value) => String(value ?? "").toLocaleLowerCase("tr").includes(query)));
     }, [orders, search, userFilter]);
 
@@ -186,7 +186,7 @@ export default function AdminOrders() {
                                             <select className="input" value={order.status} disabled={savingId === order.id || order.status === CANCELLED}
                                                 title={order.status === CANCELLED ? "İptal edilen sipariş yeniden açılamaz." : undefined}
                                                 onChange={(event) => changeStatus(order, event.target.value)}>
-                                                {[...new Set([order.status, ...ORDER_STEPS, CANCELLED])].map((status) => <option key={status} value={status}>{status}</option>)}
+                                                {[...new Set([order.status, ...ORDER_STEPS, CANCELLED])].map((status) => <option key={status} value={status}>{orderStatusLabel(status)}</option>)}
                                             </select>
                                         </td>
                                     </tr>

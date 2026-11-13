@@ -22,6 +22,22 @@ describe("iyzico bağlantısını sıcak tutma", () => {
     expect(seen).toEqual(["HEAD /"]);
   });
 
+  it("ilk bağlantı düşerse hemen tekrar dener; ikincisi geçerse yol ısınmış olur", async () => {
+    let connections = 0;
+    server = createServer((_req, res) => res.end());
+    // iyzico'nun soğuk yol davranışı: ilk bağlantı cevapsız kesilir, sonrakiler normal.
+    server.on("connection", (socket) => {
+      connections++;
+      if (connections === 1) socket.destroy();
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const base = loadConfig({});
+    const keepWarm = new IyzicoKeepWarm({ ...base, iyzico: { ...base.iyzico, baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, keepWarmIntervalMs: 0 } });
+
+    expect(await keepWarm.ping()).toBeGreaterThanOrEqual(0);
+    expect(connections).toBe(2);
+  });
+
   it("ulaşılamazsa hata fırlatmaz, -1 döner", async () => {
     const base = loadConfig({});
     const keepWarm = new IyzicoKeepWarm({ ...base, iyzico: { ...base.iyzico, baseUrl: "http://127.0.0.1:1", keepWarmIntervalMs: 0 } });

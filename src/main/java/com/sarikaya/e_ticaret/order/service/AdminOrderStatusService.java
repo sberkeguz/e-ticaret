@@ -5,7 +5,9 @@ import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.order.dto.OrderResponse;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import org.springframework.stereotype.Service;
@@ -14,8 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AdminOrderStatusService {
 
-    private static final String ORDER_CANCELLED = "İptal edildi";
-    private static final String PAYMENT_PAID = "PAID";
+    private static final OrderStatus ORDER_CANCELLED = OrderStatus.CANCELLED;
+    private static final PaymentStatus PAYMENT_PAID = PaymentStatus.PAID;
 
     private final OrderService orderService;
     private final PaymentService paymentService;
@@ -33,7 +35,11 @@ public class AdminOrderStatusService {
     }
 
     @Transactional
-    public OrderResponse changeStatus(Long orderId, String newStatus, String adminIp) {
+    public OrderResponse changeStatus(Long orderId, String requestedStatus, String adminIp) {
+        OrderStatus newStatus = OrderStatus.parse(requestedStatus);
+        if (newStatus == null || !OrderStatus.ADMIN_SELECTABLE.contains(newStatus)) {
+            throw new BadRequestException("Geçersiz sipariş durumu.");
+        }
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı."));
 
@@ -49,7 +55,7 @@ public class AdminOrderStatusService {
             return orderService.updateStatus(orderId, newStatus);
         }
 
-        String paymentStatus = paymentRepository.findByOrder_Id(orderId)
+        PaymentStatus paymentStatus = paymentRepository.findByOrder_Id(orderId)
                 .map(Payment::getStatus)
                 .orElse(null);
 

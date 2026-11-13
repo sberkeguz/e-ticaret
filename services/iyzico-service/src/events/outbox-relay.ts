@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { context, propagation, ROOT_CONTEXT, trace, TraceFlags, type Context } from "@opentelemetry/api";
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from "@nestjs/common";
 import { type ChannelModel, type ConfirmChannel, connect } from "amqplib";
 import { APP_CONFIG, type AppConfig } from "../config.js";
@@ -95,14 +97,20 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
         }
         try {
           for (const row of rows) {
-            channel.publish(row.exchange, row.routing_key, Buffer.from(JSON.stringify(row.payload)), {
-              messageId: row.id,
-              type: row.type,
-              contentType: "application/json",
-              persistent: true, // RabbitMQ yeniden başlasa da kaybolmaz
-              timestamp: Math.floor(row.created_at.getTime() / 1000),
-              headers: { "x-event-version": EVENT_VERSION },
-            });
+            // Olay, ödemeyi başlatan isteğin izine (trace) bağlanır: Grafana'da "istek → iyzico →
+            // olay → backend dinleyicisi" tek zincir görünür. Olay geç (ör. 1 dk sonra) yayınlansa da.
+            const parent = traceContextOf(row.payload);
+            const headers: Record<string, string | number> = { "x-event-version": EVENT_VERSION, ...traceHeaders(parent) };
+            context.with(parent, () =>
+              channel.publish(row.exchange, row.routing_key, Buffer.from(JSON.stringify(row.payload)), {
+                messageId: row.id,
+                type: row.type,
+                contentType: "application/json",
+                persistent: true, // RabbitMQ yeniden başlasa da kaybolmaz
+                timestamp: Math.floor(row.created_at.getTime() / 1000),
+                headers,
+              }),
+            );
           }
           await channel.waitForConfirms();
         } catch (error) {
@@ -163,4 +171,34 @@ class PublishFailed extends Error {
   ) {
     super(cause.message, { cause });
   }
+}
+
+const TRACE_ID = /^[0-9a-f]{32}$/;
+
+/** Olaydaki traceId'den, OpenTelemetry'nin devam ettirebileceği bir üst bağlam üretir. */
+export function traceContextOf(payload: unknown): Context {
+  const traceId = (payload as { traceId?: unknown } | null)?.traceId;
+  if (typeof traceId !== "string" || !TRACE_ID.test(traceId) || /^0+$/.test(traceId)) {
+    return ROOT_CONTEXT;
+  }
+  return trace.setSpanContext(ROOT_CONTEXT, {
+    traceId,
+    spanId: randomBytes(8).toString("hex"),
+    traceFlags: TraceFlags.SAMPLED,
+    isRemote: true,
+  });
+}
+
+/**
+ * Mesaja konacak W3C traceparent başlığı. OpenTelemetry açıksa amqplib izlemesi bunu kendi
+ * span'iyle günceller; kapalıysa da başlık gider, backend aynı traceId ile log yazar.
+ */
+export function traceHeaders(parent: Context): Record<string, string> {
+  const headers: Record<string, string> = {};
+  propagation.inject(parent, headers);
+  const span = trace.getSpanContext(parent);
+  if (!headers.traceparent && span) {
+    headers.traceparent = `00-${span.traceId}-${span.spanId}-01`;
+  }
+  return headers;
 }

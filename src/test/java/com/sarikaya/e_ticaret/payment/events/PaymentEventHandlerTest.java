@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.payment.events;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentRefunder;
 import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
@@ -54,7 +55,7 @@ class PaymentEventHandlerTest {
     @Test
     void successForPendingOrderCompletesIt() {
         // Senkron cevap kaybolmuş: sipariş hâlâ bekliyor, olay onu tamamlar.
-        Payment payment = payment("PENDING", null);
+        Payment payment = payment(PaymentStatus.PENDING, null);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
@@ -66,7 +67,7 @@ class PaymentEventHandlerTest {
 
     @Test
     void successAlreadyAppliedBySyncPathChangesNothing() {
-        payment("PAID", ATTEMPT);
+        payment(PaymentStatus.PAID, ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
@@ -76,7 +77,7 @@ class PaymentEventHandlerTest {
 
     @Test
     void reviewTurnsIntoPaidWhenSuccessArrives() {
-        Payment payment = payment("REVIEW", ATTEMPT);
+        Payment payment = payment(PaymentStatus.REVIEW, ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
@@ -108,7 +109,7 @@ class PaymentEventHandlerTest {
 
     @Test
     void secondSuccessfulPaymentIsRefundedAutomatically() {
-        payment("PAID", OTHER_ATTEMPT);
+        payment(PaymentStatus.PAID, OTHER_ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
@@ -119,7 +120,7 @@ class PaymentEventHandlerTest {
 
     @Test
     void uncertainSecondPaymentIsRefundedToo() {
-        payment("PAID", OTHER_ATTEMPT);
+        payment(PaymentStatus.PAID, OTHER_ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("VERIFYING", ATTEMPT));
@@ -129,18 +130,18 @@ class PaymentEventHandlerTest {
 
     @Test
     void latePaymentForExpiredOrderIsRefundedAutomatically() {
-        Payment payment = payment("EXPIRED", ATTEMPT);
+        Payment payment = payment(PaymentStatus.EXPIRED, ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
         verify(refunder).refund(any(), eq(PaymentAlert.Kind.LATE_PAYMENT), anyString());
-        assertEquals("EXPIRED", payment.getStatus());
+        assertEquals(PaymentStatus.EXPIRED, payment.getStatus());
     }
 
     @Test
     void latePaymentForCancelledOrderIsRefundedAutomatically() {
-        payment("CANCELLED", ATTEMPT);
+        payment(PaymentStatus.CANCELLED, ATTEMPT);
         allowProcessing();
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
@@ -183,20 +184,20 @@ class PaymentEventHandlerTest {
     @Test
     void olderEventDoesNotOverrideNewerOne() {
         // "Başarılı" (sıra 7) önce işlendi; ardından gecikmiş "doğrulanıyor" (sıra 5) geliyor.
-        Payment payment = payment("PAID", ATTEMPT);
+        Payment payment = payment(PaymentStatus.PAID, ATTEMPT);
         payment.setLastEventSequence(7L);
         allowProcessing();
 
         handler().handle("m-2", withSequence(event("VERIFYING", ATTEMPT), 5L));
 
-        assertEquals("PAID", payment.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
         assertEquals(7L, payment.getLastEventSequence());
         verifyNoInteractions(paymentService, refunder);
     }
 
     @Test
     void newerEventIsAppliedAndRemembered() {
-        Payment payment = payment("PENDING", ATTEMPT);
+        Payment payment = payment(PaymentStatus.PENDING, ATTEMPT);
         payment.setLastEventSequence(5L);
         allowProcessing();
 
@@ -228,7 +229,7 @@ class PaymentEventHandlerTest {
         when(processed.markProcessed(anyString(), anyString())).thenReturn(true);
     }
 
-    private Payment payment(String status, UUID attemptId) {
+    private Payment payment(PaymentStatus status, UUID attemptId) {
         Order order = new Order();
         order.setId(42L);
         Payment payment = new Payment();

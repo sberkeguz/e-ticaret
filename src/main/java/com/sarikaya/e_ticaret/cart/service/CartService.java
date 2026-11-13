@@ -9,6 +9,7 @@ import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.exception.PaymentInProgressException;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.user.entity.Role;
 import com.sarikaya.e_ticaret.user.entity.User;
@@ -44,7 +45,7 @@ public class CartService {
     public List<CartItemResponse> replaceCart(User user, CartRequest request) {
         user = userRepository.findByIdForUpdate(user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Kullanıcı bulunamadı."));
-        if (paymentRepository.existsByOrder_User_IdAndStatusIn(user.getId(), List.of("PENDING"))) {
+        if (paymentRepository.existsByOrder_User_IdAndStatusIn(user.getId(), List.of(PaymentStatus.PENDING))) {
             throw new PaymentInProgressException("Devam eden ödemeniz varken sepet değiştirilemez.");
         }
         Map<Long, CartItem> existingByProduct = new HashMap<>();

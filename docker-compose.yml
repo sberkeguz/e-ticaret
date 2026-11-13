@@ -70,8 +70,13 @@
         IYZIPAY_BASE_URL: ${IYZIPAY_BASE_URL:-https://sandbox-api.iyzipay.com}
         # 3D dönüşü tarayıcıdan backend'e gelir (ngrok), backend bu servise iletir.
         IYZIPAY_CALLBACK_URL: ${IYZIPAY_CALLBACK_URL:-http://localhost:8080/api/payments/callback}
-        # iyzico ~10 dk sessizlikten sonra ilk bağlantıyı düşürüyor; 4 dk'da bir küçük istekle sıcak tutulur. 0 = kapalı.
-        IYZIPAY_KEEP_WARM_MS: ${IYZIPAY_KEEP_WARM_MS:-240000}
+        # iyzico birkaç dk sessizlikten sonra ilk bağlantıyı düşürüyor; dakikada bir küçük istekle sıcak tutulur. 0 = kapalı.
+        IYZIPAY_KEEP_WARM_MS: ${IYZIPAY_KEEP_WARM_MS:-60000}
+        # İzleme: izler ve ölçümler Grafana'ya (lgtm) gider.
+        OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+        OTEL_SERVICE_NAME: iyzico-service
+        OTEL_LOGS_EXPORTER: none
+        OTEL_METRIC_EXPORT_INTERVAL: "15000"
       ports:
         # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, Swagger UI).
         - "127.0.0.1:8081:8081"
@@ -98,6 +103,10 @@
         JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
         IYZICO_SERVICE_URL: http://iyzico-service:8081
         RABBITMQ_HOST: rabbitmq
+        # İzleme: izler ve ölçümler Grafana'ya (lgtm) gider.
+        OTEL_ENABLED: "true"
+        OTEL_TRACES_ENDPOINT: http://lgtm:4318/v1/traces
+        OTEL_METRICS_ENDPOINT: http://lgtm:4318/v1/metrics
         RABBITMQ_USER: ${RABBITMQ_USER:-eticaret}
         RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}
         INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
@@ -121,7 +130,26 @@
       depends_on:
         - backend
 
+    # Grafana + Tempo (izler) + Prometheus (ölçümler) + Loki tek konteynerde. Yalnızca yerel geliştirme için.
+    # Grafana: http://localhost:3001 (giriş gerekmez). Servisler OTLP ile 4318'e gönderir.
+    lgtm:
+      image: grafana/otel-lgtm:0.38.1
+      environment:
+        GF_AUTH_ANONYMOUS_ENABLED: "true"
+        GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+        GF_AUTH_DISABLE_LOGIN_FORM: "true"
+        # Sayaç yeni açıldığında (servis yeniden başlayınca) başlangıç anına sıfır yazılır; yoksa düşük
+        # trafikte ilk istek grafikte kaybolur (artış "başlangıç değeri" sanılır).
+        PROMETHEUS_EXTRA_ARGS: --enable-feature=created-timestamp-zero-ingestion
+      ports:
+        - "127.0.0.1:3001:3000"
+      volumes:
+        - lgtm_data:/data
+        - ./docker/grafana/dashboards:/otel-lgtm/dashboards/e-ticaret:ro
+        - ./docker/grafana/provisioning/e-ticaret-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/e-ticaret.yaml:ro
+
   volumes:
     postgres_data:
     rabbitmq_data:
     pgadmin_data:
+    lgtm_data:

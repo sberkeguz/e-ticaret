@@ -4,6 +4,7 @@ import com.sarikaya.e_ticaret.category.entity.Category;
 import com.sarikaya.e_ticaret.order.dto.OrderStatsResponse;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
@@ -11,7 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,7 +27,6 @@ import java.util.stream.Collectors;
 @Service
 public class OrderStatsService {
     /** Yalnızca gerçekleşmiş satışlar sayılır; iptal, ödeme bekleyen veya süresi dolan siparişler hariç. */
-    private static final Set<String> SOLD_STATUSES = Set.of("Hazırlanıyor", "Kargoya verildi", "Teslim edildi");
     private static final int TREND_WINDOW_DAYS = 7;
     private static final int TOP_LIMIT = 3;
 
@@ -40,7 +41,7 @@ public class OrderStatsService {
     @Transactional(readOnly = true)
     public OrderStatsResponse stats() {
         List<Order> sold = orders.findAllByOrderByCreatedAtDesc().stream()
-                .filter(order -> SOLD_STATUSES.contains(order.getStatus()))
+                .filter(order -> OrderStatus.SOLD.contains(order.getStatus()))
                 .toList();
 
         Set<Long> productIds = new HashSet<>();
@@ -48,9 +49,9 @@ public class OrderStatsService {
         Map<Long, Product> productsById = products.findAllById(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
 
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime recentStart = now.minusDays(TREND_WINDOW_DAYS);
-        LocalDateTime previousStart = now.minusDays(TREND_WINDOW_DAYS * 2L);
+        Instant now = Instant.now();
+        Instant recentStart = now.minus(Duration.ofDays(TREND_WINDOW_DAYS));
+        Instant previousStart = now.minus(Duration.ofDays(TREND_WINDOW_DAYS * 2L));
 
         Map<Long, Tally> productTotals = new HashMap<>();
         Map<Long, Tally> categoryTotals = new HashMap<>();

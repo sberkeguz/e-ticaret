@@ -3,6 +3,7 @@ package com.sarikaya.e_ticaret.payment.events;
 import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentRefunder;
 import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import org.slf4j.Logger;
@@ -100,7 +101,7 @@ public class PaymentEventHandler {
                     payment.getLastEventSequence() == null ? 0 : payment.getLastEventSequence()));
         }
         switch (payment.getStatus()) {
-            case "PENDING" -> {
+            case PENDING -> {
                 // Cevap kaybolmuş ya da asenkron ödeme: olay sayesinde sipariş tamamlanıyor.
                 payment.setAttemptId(data.attemptId());
                 if (data.iyzicoPaymentId() != null) {
@@ -109,14 +110,14 @@ public class PaymentEventHandler {
                 paymentService.applyAttemptResult(payment, payment.getOrder(), data.status());
                 log.info("Sipariş {} ödeme olayıyla tamamlandı ({})", data.orderId(), data.status());
             }
-            case "PAID", "REVIEW", "REFUNDED" -> {
+            case PAID, REVIEW, REFUNDED -> {
                 if (!sameAttempt) {
                     refunder.refund(data, PaymentAlert.Kind.SECOND_PAYMENT,
                             "Sipariş " + data.orderId() + " zaten ödenmişken ikinci bir ödeme alındı.");
                     return;
                 }
                 // İnceleme sonucu netleşti: para alınmış.
-                if ("REVIEW".equals(payment.getStatus()) && "SUCCEEDED".equals(data.status())) {
+                if (payment.getStatus() == PaymentStatus.REVIEW && "SUCCEEDED".equals(data.status())) {
                     paymentService.applyAttemptResult(payment, payment.getOrder(), "SUCCEEDED");
                     log.info("Sipariş {} incelemeden çıktı, ödendi", data.orderId());
                 }

@@ -4,15 +4,15 @@ import { apiFetch } from "../api";
 import StoreHeader from "../components/StoreHeader";
 import { clearRemoved } from "../cart";
 
-import { ORDER_STEPS, CANCELLED } from "../orderStatus";
+import { CANCELLED, ORDER_STEPS, OFF_TRACK, PAYMENT_PENDING, orderStatusLabel, paymentStatusLabel } from "../orderStatus";
 import { PAYMENT_REASON_KEY } from "./Checkout";
 
 const money = (value) => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const formatDate = (value) => new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
 
 function Tracker({ status }) {
-    if (status === CANCELLED || status === "Ödeme bekliyor" || status === "Ödeme inceleniyor" || status === "Ödeme süresi doldu") {
-        return <span className="badge badge-gray">{status}</span>;
+    if (OFF_TRACK.has(status)) {
+        return <span className="badge badge-gray">{orderStatusLabel(status)}</span>;
     }
     const current = Math.max(ORDER_STEPS.indexOf(status), 0);
     return (
@@ -20,7 +20,7 @@ function Tracker({ status }) {
             {ORDER_STEPS.map((step, index) => (
                 <li key={step} className={index < current ? "done" : index === current ? "current" : ""}>
                     <span className="order-dot">{index <= current ? "✓" : index + 1}</span>
-                    <span className="order-step">{step}</span>
+                    <span className="order-step">{orderStatusLabel(step)}</span>
                 </li>
             ))}
         </ol>
@@ -52,7 +52,7 @@ function OrderDetails({ orderId }) {
     return (
         <div className="order-detail">
             <dl className="order-detail-facts">
-                <div><dt>Ödeme durumu</dt><dd><span className={`badge ${paid ? "badge-green" : "badge-gray"}`}>{detail.paymentStatus}</span></dd></div>
+                <div><dt>Ödeme durumu</dt><dd><span className={`badge ${paid ? "badge-green" : "badge-gray"}`}>{paymentStatusLabel(detail.paymentStatus)}</span></dd></div>
                 <div><dt>Sipariş tarihi</dt><dd>{formatLongDate(detail.createdAt)}</dd></div>
                 <div><dt>Ödenen tutar</dt><dd><b>{money(detail.paidAmount)}</b>{!paid && <span className="section-caption"> (sipariş tutarı {money(detail.total)})</span>}</dd></div>
             </dl>
@@ -209,7 +209,7 @@ export default function MyOrders() {
                                         <OrderDetails orderId={order.id} />
                                     </div>
                                 )}
-                                {order.status === "Ödeme bekliyor" && (
+                                {order.status === PAYMENT_PENDING && (
                                     <div className="order-actions">
                                         <button className="button button-primary" type="button" disabled={cancellingId === order.id}
                                             onClick={() => navigate(`/checkout?order=${order.id}`)}>

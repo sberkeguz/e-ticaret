@@ -1,5 +1,7 @@
 package com.sarikaya.e_ticaret.payment.service;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
 import com.sarikaya.e_ticaret.order.entity.Order;
@@ -52,7 +54,7 @@ class PaymentServiceAdminCancelTest {
         order.setId(42L);
         order.setUser(user);
         order.setTotal(new BigDecimal("25.00"));
-        order.setStatus("Hazırlanıyor");
+        order.setStatus(OrderStatus.PREPARING);
 
         OrderItem item = new OrderItem();
         item.setOrder(order);
@@ -72,65 +74,65 @@ class PaymentServiceAdminCancelTest {
 
     @Test
     void paidOrderIsRefundedAndStockIsReturned() {
-        Payment payment = payment("PAID");
+        Payment payment = payment(PaymentStatus.PAID);
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
         verify(iyzicoService).refund(ATTEMPT, "127.0.0.1");
-        assertEquals("REFUNDED", payment.getStatus());
-        assertEquals("İptal edildi", order.getStatus());
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
         assertEquals(5, product.getStock());
     }
 
     @Test
     void paymentFromBeforeIyzicoServiceIsRefundedByIyzicoPaymentId() {
-        Payment payment = payment("PAID");
+        Payment payment = payment(PaymentStatus.PAID);
         payment.setAttemptId(null);
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
         verify(iyzicoService).refundLegacy("iyzico-payment-1", new BigDecimal("25.00"), "127.0.0.1", 42L);
-        assertEquals("REFUNDED", payment.getStatus());
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
     }
 
     @Test
     void failedRefundChangesNothing() {
-        Payment payment = payment("PAID");
+        Payment payment = payment(PaymentStatus.PAID);
         when(iyzicoService.refund(ATTEMPT, "127.0.0.1")).thenThrow(new BadRequestException("İade süresi geçti"));
 
         BadRequestException error = assertThrows(BadRequestException.class,
                 () -> service.cancelByAdmin(42L, "127.0.0.1"));
 
         assertEquals("İade süresi geçti", error.getMessage());
-        assertEquals("PAID", payment.getStatus());
-        assertEquals("Hazırlanıyor", order.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+        assertEquals(OrderStatus.PREPARING, order.getStatus());
         assertEquals(3, product.getStock());
     }
 
     @Test
     void pendingPaymentIsClosedWithoutRefund() {
-        order.setStatus("Ödeme bekliyor");
-        Payment payment = payment("PENDING");
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
+        Payment payment = payment(PaymentStatus.PENDING);
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
                 ATTEMPT, 42L, "FAILED", null, "Kart reddedildi", "t", null));
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
         verify(iyzicoService, never()).refund(any(), any());
-        assertEquals("CANCELLED", payment.getStatus());
-        assertEquals("İptal edildi", order.getStatus());
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
         assertEquals(5, product.getStock());
     }
 
     @Test
     void adminCannotCancelWhileChargeIsInFlight() {
-        order.setStatus("Ödeme bekliyor");
-        Payment payment = payment("PENDING");
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
+        Payment payment = payment(PaymentStatus.PENDING);
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
                 ATTEMPT, 42L, "SENT", null, null, "t", null));
 
         assertThrows(BadRequestException.class, () -> service.cancelByAdmin(42L, "127.0.0.1"));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
         assertEquals(3, product.getStock());
     }
 
@@ -140,25 +142,25 @@ class PaymentServiceAdminCancelTest {
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
-        assertEquals("İptal edildi", order.getStatus());
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
         assertEquals(5, product.getStock());
     }
 
     @Test
     void expiredPaymentDoesNotReturnStockTwice() {
-        order.setStatus("Ödeme süresi doldu");
-        Payment payment = payment("EXPIRED");
+        order.setStatus(OrderStatus.PAYMENT_EXPIRED);
+        Payment payment = payment(PaymentStatus.EXPIRED);
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
-        assertEquals("EXPIRED", payment.getStatus());
-        assertEquals("İptal edildi", order.getStatus());
+        assertEquals(PaymentStatus.EXPIRED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
         assertEquals(3, product.getStock());
     }
 
     @Test
     void alreadyCancelledOrderIsLeftAlone() {
-        order.setStatus("İptal edildi");
+        order.setStatus(OrderStatus.CANCELLED);
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
@@ -168,18 +170,18 @@ class PaymentServiceAdminCancelTest {
 
     @Test
     void paidOrderWithoutIyzicoPaymentIdCannotBeRefunded() {
-        Payment payment = payment("PAID");
+        Payment payment = payment(PaymentStatus.PAID);
         payment.setToken(null);
         payment.setAttemptId(null);
 
         assertThrows(BadRequestException.class, () -> service.cancelByAdmin(42L, "127.0.0.1"));
 
         verifyNoInteractions(iyzicoService);
-        assertEquals("PAID", payment.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
         assertEquals(3, product.getStock());
     }
 
-    private Payment payment(String status) {
+    private Payment payment(PaymentStatus status) {
         Payment payment = new Payment();
         payment.setOrder(order);
         payment.setStatus(status);

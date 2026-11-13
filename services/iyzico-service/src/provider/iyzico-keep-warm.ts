@@ -4,8 +4,8 @@ import { request as httpsRequest } from "node:https";
 import { APP_CONFIG, type AppConfig } from "../config.js";
 
 /**
- * iyzico sandbox, ~10 dakika sessizlikten sonraki ilk bağlantıyı düşürüyor (ölçüldü: ~3 sn bekleme
- * + kopma; sonraki bağlantılar normal). Bu iş, iyzico'ya birkaç dakikada bir çok küçük bir istek
+ * iyzico sandbox, birkaç dakika sessizlikten sonraki ilk bağlantıyı düşürüyor (ölçüldü: ~3 sn bekleme
+ * + kopma; hemen ardından gelen bağlantı normal). 4 dakikalık sessizlik bile yetiyor. Bu iş, iyzico'ya birkaç dakikada bir çok küçük bir istek
  * (HEAD /) atarak o sessizliğin hiç oluşmamasını sağlar. Ödeme koduna dokunmaz; cezayı ödeme
  * yerine bu istek yer. Ödeme API'sine istek değildir, para veya kayıtla ilgisi yoktur.
  */
@@ -27,8 +27,26 @@ export class IyzicoKeepWarm implements OnApplicationBootstrap, OnModuleDestroy {
     clearInterval(this.timer);
   }
 
-  /** Süreyi ms olarak döner; bağlantı kurulamazsa -1. */
-  ping(): Promise<number> {
+  /**
+   * iyzico'ya HEAD / atar. İlk bağlantı düşerse (yol soğumuş) hemen bir kez daha dener: düşen
+   * deneme yolu ısıtmaz, ancak başarılı ikinci bağlantı ısıtır. Süreyi ms döner; ikisi de olmazsa -1.
+   */
+  async ping(): Promise<number> {
+    const first = await this.headOnce();
+    if (first >= 0) {
+      return first;
+    }
+    const second = await this.headOnce();
+    if (second >= 0) {
+      this.log.log(`iyzico bağlantısı soğumuştu; ilk deneme düştü, ikincisi ${second} ms'de geçti (yol ısıtıldı)`);
+    } else {
+      this.log.warn("iyzico ısıtma isteği iki denemede de başarısız");
+    }
+    return second;
+  }
+
+  /** Tek HEAD isteği; süreyi ms olarak döner, bağlantı kurulamazsa -1. */
+  private headOnce(): Promise<number> {
     const started = performance.now();
     const url = new URL("/", this.config.iyzico.baseUrl);
     const request = url.protocol === "http:" ? httpRequest : httpsRequest;
@@ -37,9 +55,6 @@ export class IyzicoKeepWarm implements OnApplicationBootstrap, OnModuleDestroy {
         res.resume();
         res.on("end", () => {
           const ms = Math.round(performance.now() - started);
-          if (ms > 1_000) {
-            this.log.log(`iyzico bağlantısı soğumuştu, ısıtıldı (${ms} ms)`);
-          }
           resolve(ms);
         });
       });

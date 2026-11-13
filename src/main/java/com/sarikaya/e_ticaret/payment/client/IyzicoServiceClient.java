@@ -34,12 +34,14 @@ public class IyzicoServiceClient {
 
     public IyzicoServiceClient(
             @Value("${iyzico-service.url:http://localhost:8081}") String baseUrl,
-            @Value("${iyzico-service.token:}") String token) {
+            @Value("${iyzico-service.token:}") String token,
+            RestClient.Builder builder) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         // iyzico'nun kendi zaman aşımı 140 sn; servis cevabını beklerken ondan önce vazgeçmeyelim.
         requestFactory.setReadTimeout(Duration.ofSeconds(180));
-        this.http = RestClient.builder()
+        // Spring'in hazır builder'ı izleme (traceparent başlığı) ve ölçümleri ekler.
+        this.http = builder
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
                 .defaultHeader("X-Internal-Token", token)

@@ -2,7 +2,7 @@ package com.sarikaya.e_ticaret.user.dto;
 
 import com.sarikaya.e_ticaret.user.entity.User;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 // DTO (Data Transfer Object): Veritabanındaki orijinal 'User' sınıfında (entity) kullanıcının
 // şifresi (password) gibi dışarı sızmaması gereken çok hassas bilgiler bulunur.
@@ -13,7 +13,7 @@ public record UserDto (
         String username,             // Sisteme giriş yaptığı kullanıcı adı
         String role,                 // Kullanıcının yetkisi (Örneğin: "ADMIN" veya "USER")
         boolean active,              // Hesabın aktif (kullanılabilir) mi yoksa pasif (engellenmiş) mi olduğu
-        LocalDateTime lastLoginAt    // Kullanıcının sisteme en son giriş yaptığı tarih ve saat
+        Instant lastLoginAt    // Kullanıcının sisteme en son giriş yaptığı tarih ve saat
 ){
 
     // from() metodu: Veritabanından çekilen orijinal 'User' nesnesini (user) parametre olarak alır.

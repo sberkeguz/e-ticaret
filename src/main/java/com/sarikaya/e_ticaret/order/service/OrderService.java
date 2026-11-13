@@ -6,6 +6,7 @@ import com.sarikaya.e_ticaret.order.dto.OrderRequest;
 import com.sarikaya.e_ticaret.order.dto.OrderResponse;
 import com.sarikaya.e_ticaret.order.entity.Order;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
@@ -17,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 @Service
 public class OrderService {
@@ -84,8 +84,6 @@ public class OrderService {
                         .toList());
     }
 
-    private static final Set<String> ALLOWED_STATUSES =
-            Set.of("Hazırlanıyor", "Kargoya verildi", "Teslim edildi", "İptal edildi");
 
     @Transactional(readOnly = true)
     public List<OrderResponse> findMine(String username) {
@@ -99,8 +97,8 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponse updateStatus(Long id, String newStatus) {
-        boolean isValid = newStatus != null && ALLOWED_STATUSES.contains(newStatus);
+    public OrderResponse updateStatus(Long id, OrderStatus newStatus) {
+        boolean isValid = newStatus != null && OrderStatus.ADMIN_SELECTABLE.contains(newStatus);
         if (!isValid) {
             throw new BadRequestException("Geçersiz sipariş durumu.");
         }

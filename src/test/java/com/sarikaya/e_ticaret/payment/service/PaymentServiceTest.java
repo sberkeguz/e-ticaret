@@ -1,5 +1,7 @@
 package com.sarikaya.e_ticaret.payment.service;
 
+import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.cart.entity.CartItem;
 import com.sarikaya.e_ticaret.cart.repository.CartItemRepository;
 import com.sarikaya.e_ticaret.exception.BadRequestException;
@@ -58,7 +60,7 @@ class PaymentServiceTest {
         assertEquals("success", response.result());
         assertNull(response.threeDSHtmlContent());
         assertEquals(3, product.getStock());
-        verify(payments).save(argThat(payment -> "PAID".equals(payment.getStatus())
+        verify(payments).save(argThat(payment -> PaymentStatus.PAID == payment.getStatus()
                 && "iyzico-payment-1".equals(payment.getToken()) && ATTEMPT.equals(payment.getAttemptId())));
         verify(cartItems).deleteAll(List.of(cartItem));
     }
@@ -132,7 +134,7 @@ class PaymentServiceTest {
         var response = service.initialize("buyer", request(2, false), "127.0.0.1", KEY);
 
         assertEquals("review", response.result());
-        verify(payments).save(argThat(payment -> "REVIEW".equals(payment.getStatus())));
+        verify(payments).save(argThat(payment -> PaymentStatus.REVIEW == payment.getStatus()));
     }
 
     @Test
@@ -151,7 +153,7 @@ class PaymentServiceTest {
         assertEquals("threeds", response.result());
         assertEquals("<html>bank</html>", response.threeDSHtmlContent());
         assertEquals(3, product.getStock());
-        verify(payments).save(argThat(payment -> "PENDING".equals(payment.getStatus())
+        verify(payments).save(argThat(payment -> PaymentStatus.PENDING == payment.getStatus()
                 && "iyzico-payment-1".equals(payment.getToken()) && ATTEMPT.equals(payment.getAttemptId())));
     }
 
@@ -175,8 +177,8 @@ class PaymentServiceTest {
         String outcome = service.completeThreeDS(callback("success", "1"));
 
         assertEquals("success", outcome);
-        assertEquals("PAID", payment.getStatus());
-        assertEquals("Hazırlanıyor", order.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+        assertEquals(OrderStatus.PREPARING, order.getStatus());
         verify(cartItems).deleteAll(List.of(cartItem));
 
         // İkinci dönüş IyzicoService'e hiç gitmez.
@@ -192,7 +194,7 @@ class PaymentServiceTest {
         when(iyzicoService.completeThreeDS(eq(ATTEMPT), any())).thenReturn(result("VERIFYING"));
 
         assertEquals("review", service.completeThreeDS(callback("success", "1")));
-        assertEquals("REVIEW", payment.getStatus());
+        assertEquals(PaymentStatus.REVIEW, payment.getStatus());
         verifyNoInteractions(products);
     }
 
@@ -203,14 +205,14 @@ class PaymentServiceTest {
         when(iyzicoService.completeThreeDS(eq(ATTEMPT), any())).thenReturn(result("FAILED"));
 
         assertEquals("declined", service.completeThreeDS(callback("failure", "0")));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
         verifyNoInteractions(products);
     }
 
     @Test
     void callbackForExpiredOrderIsNotForwarded() {
         Payment payment = pendingPayment();
-        payment.setStatus("EXPIRED");
+        payment.setStatus(PaymentStatus.EXPIRED);
         when(payments.findByAttemptIdForUpdate(ATTEMPT)).thenReturn(Optional.of(payment));
 
         assertEquals("failed", service.completeThreeDS(callback("success", "1")));
@@ -235,7 +237,7 @@ class PaymentServiceTest {
                 new PayOrderRequest("buyer@example.com", "12345678901", false, card()), "127.0.0.1", KEY);
 
         assertEquals("success", response.result());
-        assertEquals("PAID", payment.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
     }
 
     @Test
@@ -249,8 +251,8 @@ class PaymentServiceTest {
         service.cancelPendingOrder("buyer", 42L);
 
         assertEquals(4, product.getStock());
-        assertEquals("CANCELLED", payment.getStatus());
-        assertEquals("İptal edildi", payment.getOrder().getStatus());
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        assertEquals(OrderStatus.CANCELLED, payment.getOrder().getStatus());
     }
 
     @Test
@@ -261,7 +263,7 @@ class PaymentServiceTest {
 
         BadRequestException error = assertThrows(BadRequestException.class, () -> service.cancelPendingOrder("buyer", 42L));
         assertTrue(error.getMessage().contains("işleniyor"));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
         verifyNoInteractions(products);
     }
 
@@ -272,7 +274,7 @@ class PaymentServiceTest {
         when(iyzicoService.getAttempt(ATTEMPT)).thenThrow(new RuntimeException("kapalı"));
 
         assertThrows(PaymentServiceUnavailableException.class, () -> service.cancelPendingOrder("buyer", 42L));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
     }
 
     @Test
@@ -281,7 +283,7 @@ class PaymentServiceTest {
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
 
         assertThrows(ResourceNotFoundException.class, () -> service.cancelPendingOrder("intruder", 42L));
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
         verifyNoInteractions(products);
     }
 
@@ -305,7 +307,7 @@ class PaymentServiceTest {
     void initializeRejectsAnotherPendingPaymentBeforeContactingProvider() {
         User user = buyer();
         when(users.findByUsernameForUpdate("buyer")).thenReturn(Optional.of(user));
-        when(payments.existsByOrder_User_IdAndStatusIn(7L, List.of("PENDING"))).thenReturn(true);
+        when(payments.existsByOrder_User_IdAndStatusIn(7L, List.of(PaymentStatus.PENDING))).thenReturn(true);
         BadRequestException error = assertThrows(BadRequestException.class,
                 () -> service.initialize("buyer", request(1, false), "127.0.0.1", KEY));
         assertTrue(error.getMessage().contains("devam eden bir ödeme"));
@@ -331,14 +333,14 @@ class PaymentServiceTest {
         Order order = payment.getOrder();
         Product product = product(2, "12.50");
         when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
-                eq("PENDING"), any())).thenReturn(List.of(payment));
+                eq(PaymentStatus.PENDING), any())).thenReturn(List.of(payment));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("FAILED"));
 
         assertEquals(1, service.expireReservations());
         assertEquals(4, product.getStock());
-        assertEquals("EXPIRED", payment.getStatus());
-        assertEquals("Ödeme süresi doldu", order.getStatus());
+        assertEquals(PaymentStatus.EXPIRED, payment.getStatus());
+        assertEquals(OrderStatus.PAYMENT_EXPIRED, order.getStatus());
     }
 
     @Test
@@ -356,7 +358,7 @@ class PaymentServiceTest {
         assertEquals("processing", response.result());
         assertEquals(42L, response.orderId());
         // Sipariş beklemede kalır; sepet henüz silinmez (ödeme reddedilirse kullanıcı tekrar dener).
-        verify(payments).save(argThat(payment -> "PENDING".equals(payment.getStatus()) && ATTEMPT.equals(payment.getAttemptId())));
+        verify(payments).save(argThat(payment -> PaymentStatus.PENDING == payment.getStatus() && ATTEMPT.equals(payment.getAttemptId())));
         verify(cartItems, never()).deleteAll(any());
     }
 
@@ -385,7 +387,7 @@ class PaymentServiceTest {
 
         assertEquals("declined", status.result());
         assertEquals("Kart limiti yetersiz", status.message());
-        assertEquals("PENDING", payment.getStatus());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
     }
 
     @Test
@@ -396,7 +398,7 @@ class PaymentServiceTest {
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SUCCEEDED"));
 
         assertEquals("success", service.paymentStatus("buyer", 42L).result());
-        assertEquals("PAID", payment.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
     }
 
     @Test
@@ -420,29 +422,29 @@ class PaymentServiceTest {
     @Test
     void expiryWaitsWhileChargeIsInFlightOrServiceIsUnreachable() {
         Payment inFlight = pendingPayment();
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq("PENDING"), any()))
+        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(inFlight));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SENT"));
 
         assertEquals(0, service.expireReservations());
-        assertEquals("PENDING", inFlight.getStatus());
+        assertEquals(PaymentStatus.PENDING, inFlight.getStatus());
 
         when(iyzicoService.getAttempt(ATTEMPT)).thenThrow(new RuntimeException("servis kapalı"));
         assertEquals(0, service.expireReservations());
-        assertEquals("PENDING", inFlight.getStatus());
+        assertEquals(PaymentStatus.PENDING, inFlight.getStatus());
         verifyNoInteractions(products);
     }
 
     @Test
     void expiryCompletesOrderInsteadWhenMoneyWasTaken() {
         Payment payment = pendingPayment();
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq("PENDING"), any()))
+        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(payment));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SUCCEEDED"));
 
         assertEquals(0, service.expireReservations());
-        assertEquals("PAID", payment.getStatus());
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
         verifyNoInteractions(products);
     }
 
@@ -510,7 +512,7 @@ class PaymentServiceTest {
         order.setCity("Istanbul");
         order.setAddress("Test adres");
         order.setTotal(new BigDecimal("25.00"));
-        order.setStatus("Ödeme bekliyor");
+        order.setStatus(OrderStatus.PAYMENT_PENDING);
         OrderItem item = new OrderItem();
         item.setOrder(order);
         item.setProductId(4L);
@@ -522,7 +524,7 @@ class PaymentServiceTest {
         payment.setOrder(order);
         payment.setToken("iyzico-payment-1");
         payment.setAttemptId(ATTEMPT);
-        payment.setStatus("PENDING");
+        payment.setStatus(PaymentStatus.PENDING);
         return payment;
     }
 }

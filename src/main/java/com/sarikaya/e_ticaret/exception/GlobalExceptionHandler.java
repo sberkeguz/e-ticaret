@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 // Controller'lardan fırlatılan hataları yakalayıp uygun HTTP cevabına çevirir.
 @Slf4j
@@ -102,6 +102,6 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ApiError> build(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status)
-                .body(new ApiError(status.value(), code, message, LocalDateTime.now()));
+                .body(new ApiError(status.value(), code, message, Instant.now()));
     }
 }

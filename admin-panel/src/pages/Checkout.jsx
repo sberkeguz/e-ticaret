@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { PAYMENT_PENDING } from "../orderStatus";
 import { apiFetch } from "../api";
 import { getCart, syncCart } from "../cart";
 import StoreHeader from "../components/StoreHeader";
@@ -77,7 +78,7 @@ export default function Checkout() {
                 if (!response.ok) throw new Error("Sipariş yüklenemedi.");
                 const order = (await response.json()).find((item) => String(item.id) === payOrderId);
                 if (!order) throw new Error("Sipariş bulunamadı.");
-                if (order.status !== "Ödeme bekliyor") throw new Error("Bu siparişin ödemesi artık beklemede değil.");
+                if (order.status !== PAYMENT_PENDING) throw new Error("Bu siparişin ödemesi artık beklemede değil.");
                 if (!active) return;
                 setPayOrder(order);
                 setItems(order.items.map((item) => ({

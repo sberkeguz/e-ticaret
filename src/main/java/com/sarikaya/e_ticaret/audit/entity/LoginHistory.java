@@ -3,7 +3,7 @@ package com.sarikaya.e_ticaret.audit.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Entity
 @Table(name = "login_history")
@@ -22,5 +22,5 @@ public class LoginHistory {
     private Long userId;
 
     @Column(nullable = false)
-    private LocalDateTime loggedInAt;
+    private Instant loggedInAt;
 }
