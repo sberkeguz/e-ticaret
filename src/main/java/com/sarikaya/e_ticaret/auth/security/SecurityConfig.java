@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.auth.security;
 
+import jakarta.servlet.DispatcherType;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -56,6 +57,9 @@ public class SecurityConfig {
                                 notPaymentCallback(),
                                 new XFrameOptionsHeaderWriter(XFrameOptionsHeaderWriter.XFrameOptionsMode.DENY))))
                 .authorizeHttpRequests(auth -> auth
+                        // Bekletmeli cevabın (ör. ödeme sonucu) ikinci geçişi: isteğin kendisi ilk geçişte
+                        // zaten doğrulandı; JWT filtresi bu geçişte çalışmadığı için burada tekrar sorulmaz.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         // Login, register ve hata sayfası herkese açık
                         .requestMatchers("/api/auth/**", "/api/user/**", "/api/payments/callback", "/error").permitAll()
                         // Admin endpoint'leri sadece ADMIN rolüne açık

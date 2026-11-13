@@ -5,6 +5,7 @@ import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
+import com.sarikaya.e_ticaret.payment.service.PaymentResultWaiters;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,7 @@ public class PaymentEventHandler {
      */
     static final Duration ORPHAN_AFTER = Duration.ofMinutes(2);
 
+    private final PaymentResultWaiters waiters;
     private final ProcessedMessages processed;
     private final PaymentRepository payments;
     private final PaymentService paymentService;
@@ -47,12 +49,15 @@ public class PaymentEventHandler {
 
     @Autowired
     public PaymentEventHandler(ProcessedMessages processed, PaymentRepository payments,
-                               PaymentService paymentService, ExtraPaymentRefunder refunder) {
-        this(processed, payments, paymentService, refunder, Clock.systemUTC());
+                               PaymentService paymentService, ExtraPaymentRefunder refunder,
+                               PaymentResultWaiters waiters) {
+        this(processed, payments, paymentService, refunder, waiters, Clock.systemUTC());
     }
 
     PaymentEventHandler(ProcessedMessages processed, PaymentRepository payments,
-                        PaymentService paymentService, ExtraPaymentRefunder refunder, Clock clock) {
+                        PaymentService paymentService, ExtraPaymentRefunder refunder,
+                        PaymentResultWaiters waiters, Clock clock) {
+        this.waiters = waiters;
         this.processed = processed;
         this.payments = payments;
         this.paymentService = paymentService;
@@ -67,6 +72,8 @@ public class PaymentEventHandler {
             return;
         }
         PaymentEvent.Data data = event.data();
+        // "Ödemeniz işleniyor..." ekranında bekleyen varsa, bu işlem kaydedilince cevabını alır.
+        waiters.wakeAfterCommit(data.orderId());
         switch (data.status()) {
             case "SUCCEEDED", "VERIFYING" -> applyMoneyTaken(event, data);
             // Para çekilmedi: senkron akış siparişi zaten doğru bıraktı (bekliyor veya geri alındı).

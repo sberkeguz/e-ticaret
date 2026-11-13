@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.category.controller;
 
+import org.springframework.transaction.annotation.Transactional;
 import com.sarikaya.e_ticaret.category.dto.CategoryResponse;
 import com.sarikaya.e_ticaret.category.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class UserCategoryController {
 
     // Sadece listeleme
     @GetMapping
+    @Transactional(readOnly = true)
     public ResponseEntity<List<CategoryResponse>> getCategories() {
         List<CategoryResponse> categories = categoryRepository.findAll()
                 .stream()

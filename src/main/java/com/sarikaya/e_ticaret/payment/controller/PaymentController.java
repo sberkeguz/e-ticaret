@@ -6,6 +6,7 @@ import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
 import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
+import com.sarikaya.e_ticaret.payment.service.PaymentStatusLongPoll;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.async.DeferredResult;
 
 import java.io.IOException;
 import java.net.URI;
@@ -28,12 +30,15 @@ public class PaymentController {
     private static final Set<String> RESULTS = Set.of("success", "review", "failed", "declined", "pending", "error");
 
     private final PaymentService paymentService;
+    private final PaymentStatusLongPoll statusLongPoll;
     private final String frontendUrl;
 
     public PaymentController(
             PaymentService paymentService,
+            PaymentStatusLongPoll statusLongPoll,
             @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.paymentService = paymentService;
+        this.statusLongPoll = statusLongPoll;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
     }
 
@@ -57,10 +62,14 @@ public class PaymentController {
                 idempotencyKey);
     }
 
-    /** "Ödemeniz işleniyor..." ekranı sonucu buradan sorar. */
+    /**
+     * "Ödemeniz işleniyor..." ekranı sonucu buradan sorar. waitMs verilirse (en fazla 15 sn) ödeme
+     * işlenirken cevap bekletilir ve sonuç gelir gelmez döner; verilmezse hemen o anki durum döner.
+     */
     @GetMapping("/orders/{orderId}/status")
-    public PaymentStatusResponse status(Authentication auth, @PathVariable Long orderId) {
-        return paymentService.paymentStatus(auth.getName(), orderId);
+    public DeferredResult<PaymentStatusResponse> status(Authentication auth, @PathVariable Long orderId,
+                                                        @RequestParam(defaultValue = "0") long waitMs) {
+        return statusLongPoll.status(auth.getName(), orderId, waitMs);
     }
 
     @PostMapping("/orders/{orderId}/cancel")

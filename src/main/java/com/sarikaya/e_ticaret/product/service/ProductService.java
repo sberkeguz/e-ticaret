@@ -30,6 +30,7 @@ public class ProductService {
         this.cartItems = cartItems;
     }
 
+    @Transactional(readOnly = true)
     public List<ProductResponse> listActive(boolean includeTestProducts) {
         List<Product> products;
         if (includeTestProducts) {
@@ -43,6 +44,7 @@ public class ProductService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse getActive(Long id, boolean includeTestProducts) {
         Product product = findActive(id);
 
@@ -54,6 +56,7 @@ public class ProductService {
         return ProductResponse.from(product);
     }
 
+    @Transactional
     public ProductResponse create(ProductRequest request) {
         Product product = new Product();
         copyRequest(request, product);

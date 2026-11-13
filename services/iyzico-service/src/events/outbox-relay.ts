@@ -2,11 +2,15 @@ import { randomBytes } from "node:crypto";
 import { context, propagation, ROOT_CONTEXT, trace, TraceFlags, type Context } from "@opentelemetry/api";
 import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from "@nestjs/common";
 import { type ChannelModel, type ConfirmChannel, connect } from "amqplib";
+import pg from "pg";
 import { APP_CONFIG, type AppConfig } from "../config.js";
 import { PrismaService } from "../prisma.service.js";
 import { EVENT_VERSION, PAYMENTS_EXCHANGE, UNROUTED_EXCHANGE, UNROUTED_QUEUE } from "./payment-events.js";
 
 const BATCH = 50;
+/** Veritabanının "yeni olay var" kanalı (bkz. migration 20261113000000_outbox_notify). */
+export const OUTBOX_CHANNEL = "iyzico_outbox";
+const LISTEN_RETRY_MS = 5_000;
 
 interface OutboxRow {
   id: string;
@@ -23,6 +27,9 @@ interface OutboxRow {
  *  2. Yayınlar ve RabbitMQ'nun "aldım" onayını (publisher confirm) bekler,
  *  3. Onay gelince satırları gönderildi diye işaretler.
  *
+ * Tur iki şekilde başlar: veritabanı yeni olay yazıldığını haber verince (LISTEN/NOTIFY, hemen) ve
+ * yedek olarak saniyede bir. Haber kaçsa ya da dinleme bağlantısı kopsa da olay en geç 1 sn'de gider.
+ *
  * RabbitMQ kapalıysa satırlar bekler, bağlantı gelince gönderilir; hiçbir olay kaybolmaz.
  * 2. ile 3. arasında süreç ölürse aynı olay bir kez daha gönderilebilir (en az bir kez teslim):
  * dinleyiciler bu yüzden messageId ile tekrar gelen mesajı ayıklar.
@@ -34,6 +41,11 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
   private connection: ChannelModel | undefined;
   private channel: ConfirmChannel | undefined;
   private running = false;
+  /** Tur sürerken yeni haber geldiyse, tur bitince bir tur daha atılır (yeni satır kaçmasın). */
+  private wakeRequested = false;
+  private listener: pg.Client | undefined;
+  private listenRetry: NodeJS.Timeout | undefined;
+  private stopped = false;
 
   constructor(
     private readonly db: PrismaService,
@@ -46,11 +58,53 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
       return;
     }
     this.timer = setInterval(() => void this.publishPending(), this.config.outboxIntervalMs);
+    if (this.config.outboxListen) {
+      void this.listen();
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
     clearInterval(this.timer);
+    clearTimeout(this.listenRetry);
+    await this.listener?.end().catch(() => undefined);
     await this.disconnect();
+  }
+
+  /** Hemen bir tur atar; tur zaten sürüyorsa bitince bir tur daha atılır. */
+  wake(): void {
+    if (this.running) {
+      this.wakeRequested = true;
+      return;
+    }
+    void this.publishPending();
+  }
+
+  /** Veritabanının "yeni olay var" haberini dinler; bağlantı koparsa 5 sn sonra yeniden bağlanır. */
+  private async listen(): Promise<void> {
+    const client = new pg.Client({ connectionString: this.config.databaseUrl });
+    const retry = (reason: string) => {
+      if (this.stopped || this.listener !== client) {
+        return;
+      }
+      this.listener = undefined;
+      this.log.warn(`Outbox dinleme bağlantısı koptu (${reason}); ${LISTEN_RETRY_MS / 1000} sn sonra yeniden bağlanılacak`);
+      void client.end().catch(() => undefined);
+      this.listenRetry = setTimeout(() => void this.listen(), LISTEN_RETRY_MS);
+    };
+    this.listener = client;
+    client.on("notification", () => this.wake());
+    client.on("error", (error) => retry(error.message));
+    client.on("end", () => retry("bağlantı kapandı"));
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${OUTBOX_CHANNEL}`);
+      this.log.log("Outbox yeni olayları anında gönderecek (LISTEN/NOTIFY)");
+      // Dinleme başlamadan yazılmış olay kalmasın.
+      this.wake();
+    } catch (error) {
+      retry((error as Error).message);
+    }
   }
 
   /** Bekleyen bütün olayları gönderir. Gönderilen satır sayısını döner. */
@@ -78,6 +132,10 @@ export class OutboxRelay implements OnApplicationBootstrap, OnModuleDestroy {
       await this.disconnect();
     } finally {
       this.running = false;
+      if (this.wakeRequested) {
+        this.wakeRequested = false;
+        setImmediate(() => void this.publishPending());
+      }
     }
     return total;
   }

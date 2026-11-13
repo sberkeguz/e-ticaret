@@ -56,6 +56,7 @@ docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_passwo
 
 - **2D (3D Secure'suz):** Asenkron. Backend kartı IyzicoService'e senkron HTTP ile gönderir (`Prefer: respond-async`); servis denemeyi kartsız kaydedip hemen `202 Accepted` döner ve iyzico'yu arka planda çağırır. Tarayıcı "Ödemeniz işleniyor…" gösterir ve `GET /api/payments/orders/{id}/status` ile sonucu sorar. Sonuç RabbitMQ olayıyla siparişe işlenir; olay gecikirse durum sorgusu servise doğrudan bakar.
 - **3D Secure:** Senkron. Bankanın SMS sayfası hemen gösterilir, dönüş ngrok üzerinden backend'e gelir.
+- **Sonucun hızlı gelmesi:** iyzico cevap verince olay outbox'a yazılır; veritabanı bunu anında haber verir (`LISTEN/NOTIFY`), olay beklemeden RabbitMQ'ya gider (yedek olarak saniyede bir kontrol). "Ödemeniz işleniyor…" ekranı sonucu bir kez sorar (`GET /api/payments/orders/{id}/status?waitMs=10000`); backend cevabı olay işlenene kadar bekletir ve hemen döner. Bekleyen soru sunucuda iş parçacığı ve veritabanı bağlantısı tutmaz (`DeferredResult`, `spring.jpa.open-in-view=false`). Backend birden fazla kopya çalışırsa olay başka kopyada işlenebilir; o zaman bekleme süresi dolup ekran tekrar sorar (yavaşlar, bozulmaz).
 
 ### Mutabakat ve fazla ödemeler
 

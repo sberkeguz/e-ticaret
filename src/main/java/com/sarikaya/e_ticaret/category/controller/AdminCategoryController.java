@@ -1,5 +1,6 @@
 package com.sarikaya.e_ticaret.category.controller;
 
+import org.springframework.transaction.annotation.Transactional;
 import com.sarikaya.e_ticaret.category.dto.CategoryRequest;
 import com.sarikaya.e_ticaret.category.dto.CategoryResponse;
 import com.sarikaya.e_ticaret.category.entity.Category;
@@ -25,6 +26,7 @@ public class AdminCategoryController {
 
     // Listelem get
     @GetMapping
+    @Transactional(readOnly = true)
     public ResponseEntity<List<CategoryResponse>> getAllCategories() {
         // Entity'leri doğrudan döndürmüyoruz; DTO'ya çeviriyoruz ki frontend'e
         // sadece id, name ve parentId gitsin (parent/children iç içe JSON'u oluşmasın).
@@ -38,6 +40,7 @@ public class AdminCategoryController {
 
     // Ekleme: POST /api/admin/categories
     @PostMapping
+    @Transactional
     // @RequestBody: Frontend'den gelen { name, parentId } JSON'unu CategoryRequest'e çevirir.
     public ResponseEntity<CategoryResponse> createCategory(
             @RequestBody CategoryRequest request) {
@@ -55,6 +58,7 @@ public class AdminCategoryController {
 
     // Güncelleme: PUT /api/admin/categories/{id}
     @PutMapping("/{id}")
+    @Transactional
     // @PathVariable: URL'deki {id} değerini alır.
     public ResponseEntity<CategoryResponse> updateCategory(
             @PathVariable Long id,
@@ -77,6 +81,7 @@ public class AdminCategoryController {
 
     // Silme: DELETE /api/admin/categories/{id}
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<Void> deleteCategory(@PathVariable Long id) {
         // Silmeden önce kategori var mı kontrol et; yoksa 404.
         if (!categoryRepository.existsById(id)) {

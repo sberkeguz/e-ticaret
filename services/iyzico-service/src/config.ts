@@ -8,6 +8,8 @@ export interface AppConfig {
   rabbitmqUrl: string;
   /** Relay outbox'a bu aralıkla bakar. */
   outboxIntervalMs: number;
+  /** Yeni olay yazılınca veritabanının haberini (LISTEN/NOTIFY) dinleyip hemen gönder. */
+  outboxListen: boolean;
   /** Mutabakat işi bu aralıkla çalışır; 0 = kapalı. */
   reconcileIntervalMs: number;
   /** Temizlik işi bu aralıkla çalışır; 0 = kapalı. */
@@ -37,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     internalApiToken: env.INTERNAL_API_TOKEN ?? "",
     rabbitmqUrl: env.RABBITMQ_URL ?? "",
     outboxIntervalMs: Number(env.OUTBOX_INTERVAL_MS ?? 1_000),
+    outboxListen: env.OUTBOX_LISTEN !== "false",
     reconcileIntervalMs: Number(env.RECONCILE_INTERVAL_MS ?? 60_000),
     cleanupIntervalMs: Number(env.CLEANUP_INTERVAL_MS ?? 60 * 60_000),
     outboxRetentionDays: Number(env.OUTBOX_RETENTION_DAYS ?? 7),

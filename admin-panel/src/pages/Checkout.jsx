@@ -30,9 +30,10 @@ const luhnValid = (number) => {
 };
 export const PAYMENT_REASON_KEY = "payment-reason";
 // Ödeme genelde 0,5 sn içinde biter: ilk soru erken, sonrakiler saniyede bir.
-const PROCESSING_FIRST_CHECK_MS = 500;
-const PROCESSING_CHECK_MS = 1000;
-const PROCESSING_MAX_CHECKS = 90; // ~90 sn; sonrasında Siparişlerim'e yönlendirilir
+// Sunucu cevabı sonuç gelene kadar bekletir (en fazla PROCESSING_WAIT_MS); sonuç gelir gelmez döner.
+const PROCESSING_WAIT_MS = 10000;
+const PROCESSING_RETRY_MS = 1000; // bağlantı hatasında tekrar sormadan önce
+const PROCESSING_GIVE_UP_MS = 90000; // ~90 sn; sonrasında Siparişlerim'e yönlendirilir
 const PAYMENT_RESULTS = ["success", "failed", "review", "pending", "declined", "error"];
 
 const blankForm = {
@@ -300,17 +301,25 @@ export default function Checkout() {
     const header = (
         <StoreHeader syncCartOnMount={false} />
     );
-    // "Ödemeniz işleniyor…": sonuç gelene kadar sunucuya sorar (genelde birkaç saniye).
+    // "Ödemeniz işleniyor…": sunucuya bir kez sorar, sunucu sonucu gelene kadar bekletip hemen
+    // cevaplar (genelde 1 sn'den kısa). Bekleme süresi dolarsa veya bağlantı koparsa tekrar sorar.
     useEffect(() => {
         if (!processingOrderId) return undefined;
         let active = true;
-        let tries = 0;
+        let timer;
+        const controller = new AbortController();
+        const giveUpAt = Date.now() + PROCESSING_GIVE_UP_MS;
         const check = async () => {
-            tries += 1;
+            let retryAfter = 0;
             try {
-                const response = await apiFetch(`/api/payments/orders/${encodeURIComponent(processingOrderId)}/status`);
+                const response = await apiFetch(
+                    `/api/payments/orders/${encodeURIComponent(processingOrderId)}/status?waitMs=${PROCESSING_WAIT_MS}`,
+                    { signal: controller.signal });
                 const status = response.ok ? await response.json() : null;
                 if (!active) return;
+                // "processing": sunucu zaten bekletti, hemen tekrar sor. Başka bir ara durum ya da
+                // hata: sunucuyu boşuna meşgul etmemek için biraz bekle.
+                if (status?.result !== "processing") retryAfter = PROCESSING_RETRY_MS;
                 if (status && ["success", "review", "declined", "failed"].includes(status.result)) {
                     // Sebep adrese yazılmaz (sahte linkle sahte mesaj gösterilemesin); bu sekmenin hafızasında taşınır.
                     try {
@@ -321,17 +330,18 @@ export default function Checkout() {
                     return;
                 }
             } catch {
-                // Bağlantı anlık koptuysa bir sonraki denemede tekrar sorarız.
+                // Bağlantı anlık koptuysa biraz bekleyip tekrar sorarız.
+                retryAfter = PROCESSING_RETRY_MS;
             }
             if (!active) return;
-            if (tries >= PROCESSING_MAX_CHECKS) {
+            if (Date.now() >= giveUpAt) {
                 navigate("/orders?payment=pending", { replace: true });
                 return;
             }
-            timer = setTimeout(check, PROCESSING_CHECK_MS);
+            timer = setTimeout(check, retryAfter);
         };
-        let timer = setTimeout(check, PROCESSING_FIRST_CHECK_MS);
-        return () => { active = false; clearTimeout(timer); };
+        check();
+        return () => { active = false; controller.abort(); clearTimeout(timer); };
     }, [processingOrderId, navigate]);
 
     const locked = saving || Boolean(threeDSHtml) || Boolean(processingOrderId);

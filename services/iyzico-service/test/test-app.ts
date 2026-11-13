@@ -22,6 +22,7 @@ function testConfig(overrides: Partial<AppConfig>): AppConfig {
     internalApiToken: TOKEN,
     reconcileIntervalMs: 0,
     cleanupIntervalMs: 0,
+    outboxListen: false,
     iyzico: { ...base.iyzico, keepWarmIntervalMs: 0 },
     ...overrides,
   };

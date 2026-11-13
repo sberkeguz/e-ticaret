@@ -6,6 +6,7 @@ import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentRefunder;
 import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
+import com.sarikaya.e_ticaret.payment.service.PaymentResultWaiters;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import org.junit.jupiter.api.Test;
 
@@ -40,7 +41,7 @@ class PaymentEventHandlerTest {
     /** Testte "şimdi" = olay zamanı + 30 sn (olay tazedir). */
     private Clock clock = Clock.fixed(Instant.parse("2026-11-12T10:00:30Z"), ZoneOffset.UTC);
     private PaymentEventHandler handler() {
-        return new PaymentEventHandler(processed, payments, paymentService, refunder, clock);
+        return new PaymentEventHandler(processed, payments, paymentService, refunder, new PaymentResultWaiters(), clock);
     }
 
     @Test
