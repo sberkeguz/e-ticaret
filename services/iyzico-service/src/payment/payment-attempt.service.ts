@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ApiProblem } from "../api/api-problem.js";
-import type { CreatePaymentRequest, PaymentAttemptView, ThreeDSCallback } from "../api/payment.dto.js";
+import type { CreatePaymentRequest, PaymentAttemptView, CheckoutFormCallback, ThreeDSCallback } from "../api/payment.dto.js";
 import { type AttemptStatus, IN_FLIGHT } from "../attempt/attempt-status.js";
 import {
   AttemptNotFoundError,
@@ -34,6 +34,8 @@ export interface StartOptions {
    * Sonuç RabbitMQ olayıyla duyurulur. 3D Secure her zaman senkrondur (banka sayfası hemen gerekir).
    */
   async?: boolean;
+  /** Deneme numarası dışarıdan verilir (kuyrukla gelen 2D isteği: backend numarayı önceden atar). */
+  attemptId?: string;
 }
 
 /**
@@ -55,7 +57,9 @@ export class PaymentAttemptService {
 
   async start(idempotencyKey: string, traceId: string, request: CreatePaymentRequest,
               options: StartOptions = {}): Promise<StartResult> {
-    const runAsync = options.async === true && !request.threeDS;
+    const checkoutForm = request.mode === "checkout-form";
+    // Yalnızca kartla 2D ödeme arka planda yapılır; 3D ve Ödeme Formu müşterinin ekranına içerik döner.
+    const runAsync = options.async === true && !request.threeDS && !checkoutForm;
     if (!this.gateway.isConfigured()) {
       throw ApiProblem.notConfigured();
     }
@@ -74,8 +78,10 @@ export class PaymentAttemptService {
         idempotencyKey,
         requestHash: fingerprint,
         amount: moneyText(request.amount),
-        threeDS: request.threeDS,
+        // Ödeme Formunda 3D doğrulamasını iyzico'nun formu yapar.
+        threeDS: request.threeDS || checkoutForm,
         traceId,
+        id: options.attemptId,
       });
     } catch (error) {
       if (!isUniqueViolation(error)) {
@@ -89,7 +95,7 @@ export class PaymentAttemptService {
       }
       throw ApiProblem.orderHasActiveAttempt(request.orderId);
     }
-    this.log.log(`Deneme ${attempt.id} oluşturuldu: sipariş ${request.orderId}, ${request.amount} TL, 3D=${request.threeDS}, trace ${traceId}`);
+    this.log.log(`Deneme ${attempt.id} oluşturuldu: sipariş ${request.orderId}, ${request.amount} TL, ${checkoutForm ? "Ödeme Formu" : `3D=${request.threeDS}`}, trace ${traceId}`);
 
     if (runAsync) {
       // Kart yalnızca bu kapanışın (closure) içinde, bellekte yaşar; veritabanına yazılmaz.
@@ -108,6 +114,9 @@ export class PaymentAttemptService {
     if (!sent) {
       // Bu arada aynı sipariş için daha yeni bir deneme başladı ve bunu iptal etti.
       return toView(await this.store.get(id));
+    }
+    if (request.mode === "checkout-form") {
+      return this.startCheckoutForm(id, request);
     }
     return request.threeDS ? this.startThreeDS(id, request) : this.charge(id, request);
   }
@@ -135,7 +144,9 @@ export class PaymentAttemptService {
       outcome = await this.gateway.charge(id, request);
     } catch (error) {
       if (error instanceof ProviderNotReachedError) {
-        return this.finish(id, "SENT", { to: "FAILED", note: "iyzico'ya ulaşılamadı", failureReason: error.message });
+        return this.finish(id, "SENT", {
+          to: "FAILED", note: `iyzico'ya ulaşılamadı: ${error.message}`, failureReason: PROVIDER_UNREACHABLE,
+        });
       }
       if (error instanceof ProviderNoAnswerError) {
         return this.verifyAfterLostAnswer(id, "SENT");
@@ -154,7 +165,9 @@ export class PaymentAttemptService {
     } catch (error) {
       if (error instanceof ProviderNotReachedError || error instanceof ProviderNoAnswerError) {
         // 3D başlatma para çekmez; cevap gelmese bile güvenle başarısız sayılır.
-        return this.finish(id, "SENT", { to: "FAILED", note: "3D başlatılamadı", failureReason: error.message });
+        return this.finish(id, "SENT", {
+          to: "FAILED", note: `3D başlatılamadı: ${error.message}`, failureReason: PROVIDER_UNREACHABLE,
+        });
       }
       throw error;
     }
@@ -212,7 +225,9 @@ export class PaymentAttemptService {
       outcome = await this.gateway.completeThreeDS(expectedOf(attempt), attempt.iyzicoPaymentId, callback.conversationData);
     } catch (error) {
       if (error instanceof ProviderNotReachedError) {
-        return this.finish(id, "CONFIRM_SENT", { to: "FAILED", note: "iyzico'ya ulaşılamadı", failureReason: error.message });
+        return this.finish(id, "CONFIRM_SENT", {
+          to: "FAILED", note: `iyzico'ya ulaşılamadı: ${error.message}`, failureReason: PROVIDER_UNREACHABLE,
+        });
       }
       if (error instanceof ProviderNoAnswerError) {
         return this.verifyAfterLostAnswer(id, "CONFIRM_SENT");
@@ -222,10 +237,123 @@ export class PaymentAttemptService {
     return this.applyOutcome(id, "CONFIRM_SENT", outcome);
   }
 
+  /**
+   * Kuyrukla gelen ama iyzico'ya gönderilmeyecek 2D isteği (süresi geçmiş veya geçersiz): deneme
+   * başarısız olarak kaydedilir ve PaymentFailed olayı yayınlanır. Aynı istek tekrar gelirse bir şey yapmaz.
+   */
+  async rejectRequest(attemptId: string, idempotencyKey: string, orderId: number, amount: string,
+                      traceId: string, reason: string): Promise<void> {
+    if (await this.store.findByIdempotencyKey(idempotencyKey)) {
+      return;
+    }
+    try {
+      await this.store.create({
+        id: attemptId, orderId, idempotencyKey, requestHash: "-".repeat(64), amount: moneyText(amount), threeDS: false, traceId,
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        return; // aynı istek ikinci kez geldi
+      }
+      throw error;
+    }
+    await this.finish(attemptId, "CREATED", { to: "FAILED", note: "Kuyruktaki istek reddedildi", failureReason: reason });
+    this.log.warn(`Deneme ${attemptId} (sipariş ${orderId}) iyzico'ya gönderilmedi: ${reason}`);
+  }
+
+  // ---------------------------------------------------------------- iyzico Ödeme Formu
+
+  /** Formu başlatır. Para çekmez; müşteri formu doldurana kadar deneme AWAITING_3DS'te bekler. */
+  private async startCheckoutForm(id: string, request: CreatePaymentRequest): Promise<PaymentAttemptView> {
+    let start;
+    try {
+      start = await this.gateway.startCheckoutForm(id, request);
+    } catch (error) {
+      if (error instanceof ProviderNotReachedError || error instanceof ProviderNoAnswerError) {
+        return this.finish(id, "SENT", { to: "FAILED", note: "Ödeme formu açılamadı", failureReason: error.message });
+      }
+      throw error;
+    }
+    if (!start.started || !start.token) {
+      return this.finish(id, "SENT", {
+        to: "FAILED", note: "Ödeme formu açılamadı", failureReason: start.message || "Ödeme formu açılamadı.",
+      });
+    }
+    const waiting = await this.store.move(id, "SENT", {
+      to: "AWAITING_3DS",
+      note: "Müşterinin iyzico ödeme formunu doldurması bekleniyor",
+      checkoutToken: start.token,
+    });
+    return waiting ? toView(waiting, null, start.content) : toView(await this.store.get(id));
+  }
+
+  /**
+   * Formun dönüşü: iyzico yalnızca token gönderir; sonuç imzalı cevapla iyzico'ya sorulur.
+   * Aynı dönüş iki kez gelirse ikincisi hiçbir şey yapmaz.
+   */
+  async completeCheckoutForm(id: string, callback: CheckoutFormCallback): Promise<PaymentAttemptView> {
+    const attempt = await this.store.get(id);
+    if (!attempt.checkoutToken || attempt.checkoutToken !== callback.token) {
+      this.log.warn(`Ödeme formu dönüşü eşleşmedi: deneme ${id}`);
+      throw ApiProblem.callbackRejected("Dönüş bu ödeme denemesiyle eşleşmiyor.");
+    }
+    if (attempt.status !== "AWAITING_3DS") {
+      return toView(attempt);
+    }
+    const confirming = await this.store.move(id, "AWAITING_3DS", {
+      to: "CONFIRM_SENT",
+      note: "Ödeme formu tamamlandı, sonuç iyzico'ya soruluyor",
+    });
+    if (!confirming) {
+      return toView(await this.store.get(id));
+    }
+    let outcome: ChargeOutcome;
+    try {
+      outcome = await this.gateway.retrieveCheckoutForm(expectedOf(attempt), attempt.checkoutToken);
+    } catch (error) {
+      if (error instanceof ProviderNotReachedError || error instanceof ProviderNoAnswerError) {
+        return this.verifyAfterLostAnswer(id, "CONFIRM_SENT");
+      }
+      throw error;
+    }
+    return this.applyOutcome(id, "CONFIRM_SENT", outcome);
+  }
+
+  /**
+   * Mutabakat: müşteri formu açık bıraktı ya da dönüş bize ulaşmadı. Müşteri ödemiş olabilir; bu
+   * yüzden önce iyzico'ya sorulur. Form süresi (30 dk) dolana kadar ödenmemişse beklemeye devam edilir.
+   */
+  private async recoverCheckoutForm(attempt: PaymentAttempt): Promise<PaymentAttemptView> {
+    const id = attempt.id;
+    let outcome: ChargeOutcome;
+    try {
+      outcome = await this.gateway.retrieveCheckoutForm(expectedOf(attempt), attempt.checkoutToken!);
+    } catch (error) {
+      if (error instanceof ProviderNotReachedError || error instanceof ProviderNoAnswerError) {
+        return toView(attempt); // sonraki turda tekrar sorulur
+      }
+      throw error;
+    }
+    if (outcome.result === "PAID") {
+      const confirming = await this.store.move(id, "AWAITING_3DS", { to: "CONFIRM_SENT", note: "Mutabakat: form ödenmiş" });
+      return confirming ? this.applyOutcome(id, "CONFIRM_SENT", outcome) : toView(await this.store.get(id));
+    }
+    if (outcome.result === "DECLINED") {
+      return this.finish(id, "AWAITING_3DS", {
+        to: "FAILED", note: "Mutabakat: form ödemesi başarısız", failureReason: outcome.message || "Ödeme başarısız.",
+      });
+    }
+    if (Date.now() - attempt.updatedAt.getTime() < CHECKOUT_FORM_LIFETIME_MS) {
+      return toView(attempt);
+    }
+    return this.finish(id, "AWAITING_3DS", {
+      to: "FAILED", note: "Mutabakat: ödeme formu zamanında doldurulmadı", failureReason: "Ödeme formu zamanında tamamlanmadı.",
+    });
+  }
+
   // ---------------------------------------------------------------- doğrulama
 
   /** VERIFYING durumundaki denemeyi iyzico'ya sorar. Cevap kesin değilse VERIFYING kalır. */
-  async verify(id: string): Promise<PaymentAttemptView> {
+  async verify(id: string, now: Date = new Date()): Promise<PaymentAttemptView> {
     const attempt = await this.store.get(id);
     if (attempt.status !== "VERIFYING") {
       return toView(attempt);
@@ -239,6 +367,21 @@ export class PaymentAttemptService {
         return toView(attempt);
       }
       throw error;
+    }
+    if (outcome.result === "NOT_FOUND") {
+      // VERIFYING'e geçiş, isteğin gönderilmesinden en fazla zaman aşımı kadar sonradır; deneme o andan
+      // beri değişmedi (updatedAt). Bu kadar süre sonra iyzico'da kayıt yoksa istek iyzico'ya hiç
+      // ulaşmamıştır: para çekilmedi.
+      const waitedMs = now.getTime() - attempt.updatedAt.getTime();
+      if (waitedMs < NOT_FOUND_FINAL_AFTER_MS) {
+        this.log.log(`Deneme ${id}: iyzico'da kayıt yok, ${Math.round(waitedMs / 1000)} sn oldu; karar için bekleniyor`);
+        return toView(attempt);
+      }
+      return this.finish(id, "VERIFYING", {
+        to: "FAILED",
+        note: `iyzico'da ${Math.round(NOT_FOUND_FINAL_AFTER_MS / 60_000)} dk boyunca ödeme kaydı yok: istek ulaşmamış`,
+        failureReason: "Ödeme tamamlanmadı; kartınızdan para çekilmedi. Lütfen tekrar deneyin.",
+      });
     }
     if (outcome.result === "UNCERTAIN") {
       this.log.log(`Deneme ${id} hâlâ belirsiz: ${outcome.message}`);
@@ -270,6 +413,9 @@ export class PaymentAttemptService {
       case "CONFIRM_SENT":
         return this.verifyAfterLostAnswer(id, "CONFIRM_SENT");
       case "AWAITING_3DS":
+        if (attempt.checkoutToken) {
+          return this.recoverCheckoutForm(attempt);
+        }
         // Kullanıcı SMS ekranını bıraktı; para çekme isteği hiç gitmedi.
         return this.finish(id, "AWAITING_3DS", {
           to: "FAILED", note: "Mutabakat: 3D doğrulaması tamamlanmadı", failureReason: "3D Secure doğrulaması zamanında tamamlanmadı.",
@@ -370,7 +516,23 @@ export class PaymentAttemptService {
   }
 }
 
-export function toView(attempt: PaymentAttempt, threeDSHtmlContent: string | null = null): PaymentAttemptView {
+/**
+ * iyzico bir ödemenin kaydını bu süre boyunca bulamazsa istek ona hiç ulaşmamış sayılır. iyzico isteği
+ * saniyeler içinde işler; zaman aşımımız 60 sn. 10 dk geniş bir güvenlik payıdır.
+ */
+export const NOT_FOUND_FINAL_AFTER_MS = 10 * 60_000;
+
+/** iyzico'ya bağlanılamadığında müşteriye gösterilen sebep (teknik ayrıntı yalnız notta/logda). */
+const PROVIDER_UNREACHABLE = "Ödeme sistemine şu an ulaşılamıyor; kartınızdan para çekilmedi. Lütfen biraz sonra tekrar deneyin.";
+
+/** iyzico Ödeme Formu token'ı 30 dk geçerli; birkaç dakika pay bırakılır. */
+const CHECKOUT_FORM_LIFETIME_MS = 35 * 60_000;
+
+export function toView(
+  attempt: PaymentAttempt,
+  threeDSHtmlContent: string | null = null,
+  checkoutFormContent: string | null = null,
+): PaymentAttemptView {
   return {
     attemptId: attempt.id,
     orderId: Number(attempt.orderId),
@@ -382,6 +544,7 @@ export function toView(attempt: PaymentAttempt, threeDSHtmlContent: string | nul
     failureReason: attempt.failureReason,
     traceId: attempt.traceId,
     threeDSHtmlContent,
+    checkoutFormContent,
   };
 }
 
@@ -393,6 +556,7 @@ function transitionFor(outcome: ChargeOutcome): Transition {
     case "DECLINED":
       return { to: "FAILED", note: "Ödeme reddedildi", iyzicoPaymentId, failureReason: outcome.message || "Ödeme alınamadı." };
     case "UNCERTAIN":
+    case "NOT_FOUND":
       return { to: "VERIFYING", note: `Sonuç belirsiz: ${outcome.message}`, iyzicoPaymentId, failureReason: outcome.message };
   }
 }

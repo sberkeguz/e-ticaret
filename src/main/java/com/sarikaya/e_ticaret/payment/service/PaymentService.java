@@ -16,6 +16,8 @@ import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
 import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
+import com.sarikaya.e_ticaret.payment.events.PaymentEventTopology;
+import com.sarikaya.e_ticaret.payment.outbox.OutboxRelay;
 import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
@@ -65,6 +67,19 @@ public class PaymentService {
     private final UserRepository users;
     private final CartItemRepository cartItems;
     private final IyzicoServiceClient iyzicoService;
+    private final OutboxRelay outbox;
+
+    /** Eski yerel (simüle) 2D ödemelerin numara öneki: iadesi iyzico'ya gönderilmez. */
+    static final String LOCAL_PAYMENT_PREFIX = "LOCAL-";
+    /** Kuyruğa giden 2D isteği bu süre içinde iyzico'ya gönderilmezse geçersiz olur (geç çekim olmasın). */
+    static final Duration CHARGE_WINDOW = Duration.ofSeconds(50);
+    /**
+     * Kuyruktaki isteğin sonucu bu kadar gecikirse uyarı logu yazılır (RabbitMQ veya iyzico-service
+     * çalışmıyor demektir). Sipariş yine de sonuç gelene kadar beklemede kalır.
+     */
+    static final Duration STALE_REQUEST_WARNING = Duration.ofMinutes(10);
+    /** Kuyrukla giden 2D isteğinin backend'deki durumu; sonuç olayla gelene kadar böyle kalır. */
+    static final String REQUESTED = "REQUESTED";
 
     public PaymentService(
             OrderRepository orders,
@@ -72,7 +87,9 @@ public class PaymentService {
             ProductRepository products,
             UserRepository users,
             CartItemRepository cartItems,
-            IyzicoServiceClient iyzicoService) {
+            IyzicoServiceClient iyzicoService,
+            OutboxRelay outbox) {
+        this.outbox = outbox;
         this.orders = orders;
         this.payments = payments;
         this.products = products;
@@ -219,6 +236,11 @@ public class PaymentService {
     }
 
     private void refund(Payment payment, Order order, String ip) {
+        if (payment.getToken() != null && payment.getToken().startsWith(LOCAL_PAYMENT_PREFIX)) {
+            // Eski yerel (simüle) 2D ödeme: para çekilmemişti, iyzico'ya iade isteği gönderilmez.
+            log.info("Sipariş {} yerel 2D ödemeydi; iade iyzico'ya gönderilmeden kaydedildi.", order.getId());
+            return;
+        }
         if (payment.getAttemptId() != null) {
             iyzicoService.refund(payment.getAttemptId(), ip);
         } else if (payment.getToken() != null) {
@@ -248,8 +270,14 @@ public class PaymentService {
                                     CheckoutRequest.Card card, boolean threeDS, String ip, String clientKey) {
         // Anahtar kullanıcıya özel olsun: başka bir hesabın anahtarıyla çakışamaz.
         String idempotencyKey = "u" + user.getId() + "-" + clientKey;
-        // 2D: servis iyzico'yu beklemeden kabul eder (asenkron). 3D: banka sayfası hemen gerekir (senkron).
-        boolean async = !threeDS;
+        if (!threeDS && card != null) {
+            return requestTwoDCharge(payment, order, startPayment(order, user, email, identityNumber, card, false, ip),
+                    idempotencyKey);
+        }
+        // Kart yoksa iyzico Ödeme Formu: kart bilgisi bize hiç gelmez, müşteri iyzico'nun formunu doldurur.
+        boolean checkoutForm = card == null;
+        // 2D: servis iyzico'yu beklemeden kabul eder (asenkron). 3D ve form: içerik hemen gerekir (senkron).
+        boolean async = !threeDS && !checkoutForm;
         AttemptResult result = iyzicoService.startPayment(idempotencyKey,
                 startPayment(order, user, email, identityNumber, card, threeDS, ip), async);
 
@@ -266,7 +294,9 @@ public class PaymentService {
             }
             case "AWAITING_3DS" -> {
                 payments.save(payment);
-                yield CheckoutResponse.threeDS(result.threeDSHtmlContent());
+                yield checkoutForm
+                        ? CheckoutResponse.form(order.getId(), result.checkoutFormContent())
+                        : CheckoutResponse.threeDS(result.threeDSHtmlContent());
             }
             case "SUCCEEDED", "VERIFYING" -> {
                 applyAttemptResult(payment, order, result.status());
@@ -274,12 +304,46 @@ public class PaymentService {
                 yield CheckoutResponse.of(resultName(payment));
             }
             // Para çekilmedi. Hata fırlatınca işlem geri alınır.
-            case "FAILED" -> throw new BadRequestException(threeDS
+            case "FAILED" -> throw new BadRequestException(checkoutForm
+                    ? withReason("Ödeme formu açılamadı", result.failureReason())
+                    : threeDS
                     ? withReason("3D Secure doğrulaması başlatılamadı", result.failureReason())
                     : withReason("Ödeme alınamadı", result.failureReason()));
             default -> throw new BadRequestException(
                     "Ödeme işleniyor. Birkaç saniye sonra Siparişlerim sayfasını kontrol edin.");
         };
+    }
+
+    /**
+     * 2D ödeme kuyrukla yapılır: istek (komut) siparişle aynı işlemde outbox'a yazılır ve RabbitMQ ile
+     * iyzico-service'e gider. Backend iyzico-service'e HTTP isteği atmaz; servis kapalıyken de sipariş
+     * alınır ve istek kuyrukta bekler. Sonuç RabbitMQ olayıyla gelir; ekran sonucu GET .../status ile sorar.
+     *
+     * İstek CHARGE_WINDOW içinde işlenmezse iyzico-service onu iyzico'ya göndermeden reddeder; böylece
+     * süresi dolmuş bir siparişten sonradan para çekilmez.
+     */
+    private CheckoutResponse requestTwoDCharge(Payment payment, Order order, StartPayment request, String idempotencyKey) {
+        if (REQUESTED.equals(payment.getLastAttemptStatus())) {
+            // Önceki isteğin sonucu henüz gelmedi; para çekilmiş olabilir. İkinci istek gönderilmez.
+            throw new BadRequestException("Ödemeniz şu an işleniyor. Sonuçlandıktan sonra tekrar deneyin.");
+        }
+        UUID attemptId = UUID.randomUUID();
+        Instant deadline = Instant.now().plus(CHARGE_WINDOW);
+        payment.setAttemptId(attemptId);
+        payment.setLastAttemptStatus(REQUESTED);
+        payment.setFailureReason(null);
+        payment.setChargeDeadline(deadline);
+        payments.save(payment);
+        outbox.enqueue(PaymentEventTopology.EXCHANGE, PaymentEventTopology.CHARGE_ROUTING_KEY, ChargeRequested.TYPE,
+                new ChargeRequested(ChargeRequested.TYPE, 1, attemptId, idempotencyKey, deadline, request));
+        log.info("Sipariş {} için 2D ödeme isteği kuyruğa yazıldı (deneme {})", order.getId(), attemptId);
+        return CheckoutResponse.processing(order.getId());
+    }
+
+    /** iyzico-service'e giden 2D ödeme komutu. request, servisin POST /payments gövdesiyle aynıdır. */
+    record ChargeRequested(String type, int version, UUID attemptId, String idempotencyKey, Instant deadline,
+                           StartPayment request) {
+        static final String TYPE = "ChargeRequested";
     }
 
     /**
@@ -316,6 +380,41 @@ public class PaymentService {
     }
 
     /**
+     * iyzico Ödeme Formu tamamlanınca tarayıcı buraya POST edilir (adreste deneme numarası, gövdede
+     * formun token'ı). Sonucu IyzicoService iyzico'ya sorar. Dönen değer: success | review | declined | pending
+     */
+    @Transactional
+    public String completeCheckoutForm(String attempt, String token) {
+        UUID attemptId;
+        try {
+            attemptId = UUID.fromString(attempt);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new BadRequestException("Geçersiz ödeme dönüşü.");
+        }
+        if (token == null || token.isBlank()) {
+            throw new BadRequestException("Geçersiz ödeme dönüşü.");
+        }
+        Payment payment = payments.findByAttemptIdForUpdate(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Ödeme bulunamadı."));
+        if (!PENDING.equals(payment.getStatus())) {
+            return resultName(payment);
+        }
+        AttemptResult result = iyzicoService.completeCheckoutForm(attemptId, token);
+        if (result.iyzicoPaymentId() != null) {
+            payment.setToken(result.iyzicoPaymentId());
+        }
+        return switch (result.status()) {
+            case "SUCCEEDED", "VERIFYING" -> {
+                applyAttemptResult(payment, payment.getOrder(), result.status());
+                yield resultName(payment);
+            }
+            // Kart reddedildi; para çekilmedi. Sipariş, yeniden denenebilmesi için beklemede kalır.
+            case "FAILED" -> "declined";
+            default -> "pending";
+        };
+    }
+
+    /**
      * Tarayıcının "ödemem ne oldu?" sorusu (asenkron 2D'de "Ödemeniz işleniyor…" ekranı bunu sorar).
      * Sonuç genelde RabbitMQ olayıyla çoktan siparişe işlenmiştir. Olay gecikirse burada
      * IyzicoService'e doğrudan sorulur ve aynı kuralla siparişe işlenir.
@@ -330,6 +429,12 @@ public class PaymentService {
         }
         if (!PENDING.equals(payment.getStatus()) || payment.getAttemptId() == null) {
             return PaymentStatusResponse.of(statusName(payment));
+        }
+        if (payment.getLastAttemptStatus() != null) {
+            // Kuyrukla giden 2D: sonuç olayla gelir; iyzico-service'e sorulmaz.
+            return "FAILED".equals(currentAttemptStatus(payment))
+                    ? new PaymentStatusResponse("declined", payment.getFailureReason())
+                    : PaymentStatusResponse.of("processing");
         }
         AttemptResult attempt;
         try {
@@ -363,8 +468,12 @@ public class PaymentService {
         for (Payment payment : candidates) {
             Order order = payment.getOrder();
             String attemptStatus = currentAttemptStatus(payment);
-            if (attemptStatus == null || IN_FLIGHT_AT_PROVIDER.contains(attemptStatus)) {
+            // AWAITING_3DS: müşteri iyzico formunda ya da bankanın SMS sayfasında; o sırada sipariş düşerse
+            // ödeme yine de alınabilir (geç ödeme). Bu denemeyi iyzico-service sonuca bağlar (3D: 15 dk,
+            // form: 35 dk); başarısız olunca sipariş sonraki turda düşer.
+            if (attemptStatus == null || IN_FLIGHT_AT_PROVIDER.contains(attemptStatus) || "AWAITING_3DS".equals(attemptStatus)) {
                 log.info("Sipariş {} ödemesi işleniyor ({}), süre dolumu ertelendi", order.getId(), attemptStatus);
+                warnIfResultIsLate(payment);
                 continue;
             }
             if ("SUCCEEDED".equals(attemptStatus)) {
@@ -378,6 +487,15 @@ public class PaymentService {
             expired++;
         }
         return expired;
+    }
+
+    private void warnIfResultIsLate(Payment payment) {
+        if (REQUESTED.equals(payment.getLastAttemptStatus())
+                && Instant.now().isAfter(payment.getChargeDeadline().plus(STALE_REQUEST_WARNING))) {
+            log.warn("Sipariş {} 2D ödeme isteğinin sonucu {} dakikadır gelmedi; RabbitMQ ve iyzico-service kontrol edilmeli. "
+                            + "Sipariş sonuç gelene kadar beklemede tutuluyor.",
+                    payment.getOrder().getId(), Duration.between(payment.getChargeDeadline(), Instant.now()).toMinutes());
+        }
     }
 
     /**
@@ -394,10 +512,22 @@ public class PaymentService {
         }
     }
 
-    /** Denemesi yoksa "NONE"; servise ulaşılamazsa null. */
+    /**
+     * Denemesi yoksa "NONE"; servise ulaşılamazsa null. Kuyrukla giden 2D'de iyzico-service'e sorulmaz,
+     * backend'in olaylardan bildiği durum döner. Sonuç olayı gelmediyse istek işleniyor sayılır ("SENT"):
+     * süre dolmuş olsa bile tahmin yürütülmez. iyzico-service her istek için mutlaka bir sonuç yayınlar
+     * (süresi geçen isteği kendisi reddeder) ve outbox'ı sayesinde bu sonuç kaybolmaz; RabbitMQ veya servis
+     * bir süre çalışmasa da sonuç sonunda gelir. Böylece para çekilmişken sipariş düşürülmez.
+     */
     private String currentAttemptStatus(Payment payment) {
         if (payment.getAttemptId() == null) {
             return "NONE";
+        }
+        if (payment.getLastAttemptStatus() != null) {
+            if (!REQUESTED.equals(payment.getLastAttemptStatus())) {
+                return payment.getLastAttemptStatus();
+            }
+            return "SENT";
         }
         try {
             return iyzicoService.getAttempt(payment.getAttemptId()).status();
@@ -408,6 +538,9 @@ public class PaymentService {
 
     /** IyzicoService sonucunu sipariş durumuna yansıtır. SUCCEEDED → PAID, VERIFYING → REVIEW. */
     public void applyAttemptResult(Payment payment, Order order, String attemptStatus) {
+        if (payment.getLastAttemptStatus() != null) {
+            payment.setLastAttemptStatus(attemptStatus);
+        }
         if ("SUCCEEDED".equals(attemptStatus)) {
             payment.setStatus(PAID);
             order.setStatus(OrderStatus.PREPARING);
@@ -437,8 +570,9 @@ public class PaymentService {
                         email.trim(), order.getPhone(), identityNumber, order.getCity(), order.getAddress()),
                 new IyzicoServiceClient.Address(contactName, order.getCity(), order.getAddress()),
                 items,
-                new IyzicoServiceClient.Card(card.holderName().trim(), card.number(), card.expireMonth(),
-                        card.expireYear(), card.cvc()));
+                card == null ? null : new IyzicoServiceClient.Card(card.holderName().trim(), card.number(),
+                        card.expireMonth(), card.expireYear(), card.cvc()),
+                card == null ? "checkout-form" : "direct");
     }
 
     private void releaseStock(Order order) {

@@ -132,7 +132,7 @@ groups:
         execErrState: Error
         labels: { severity: warning }
         annotations:
-          summary: Fazla, geç veya sahipsiz bir ödeme otomatik iade edildi; admin henüz incelemedi.
+          summary: Fazla, geç veya sahipsiz bir ödeme geldi (iade edilmedi); admin henüz incelemedi.
           description: Admin paneli > "Ödeme uyarıları" kartından inceleyip kapatın.
         data:
           - refId: A

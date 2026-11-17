@@ -12,7 +12,7 @@ const money = (value: number | string | null | undefined): string => Number(valu
 const when = (value: string): string => new Date(value).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
 
 /**
- * Fazladan alınan ödemeler: sistem bunları otomatik iade eder ve burada gösterir.
+ * Fazladan alınan ödemeler: sistem bunları iade etmez, burada gösterir; admin karar verir.
  * Admin gördüğünü "Tamam" ile kapatır.
  */
 export default function PaymentAlertsCard() {
@@ -43,7 +43,7 @@ export default function PaymentAlertsCard() {
             <div className="toolbar">
                 <div>
                     <h2 className="section-title">Ödeme uyarıları</h2>
-                    <p className="section-caption">Fazladan alınan ödemeler otomatik iade edilir ve burada listelenir.</p>
+                    <p className="section-caption">Fazladan alınan ödemeler (ikinci, geç veya siparişsiz) burada listelenir. Para otomatik iade edilmez.</p>
                 </div>
             </div>
             {error ? (

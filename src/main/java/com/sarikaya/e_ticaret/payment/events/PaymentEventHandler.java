@@ -1,6 +1,7 @@
 package com.sarikaya.e_ticaret.payment.events;
 
-import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentRefunder;
+import com.sarikaya.e_ticaret.order.entity.OrderStatus;
+import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentAlerts;
 import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
@@ -19,49 +20,34 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
 
-/**
- * IyzicoService'in ödeme olayını siparişe uygular. Tek bir veritabanı işlemidir:
- * mesaj numarasını "işlendi" diye yazmak ve siparişi güncellemek birlikte olur ya da hiç olmaz.
- *
- * Olay çoğu zaman senkron cevapla aynı sonucu taşır ve hiçbir şey değiştirmez. İşe yaradığı yerler:
- * <ul>
- *   <li>Cevap kaybolduysa: para çekildiyse sipariş yine de "ödendi" olur.</li>
- *   <li>Fazladan ödeme geldiyse (ikinci ödeme, süresi dolmuş siparişe ödeme, siparişi olmayan ödeme):
- *       otomatik iade edilir ve admin'e uyarı düşer.</li>
- * </ul>
- */
 @Service
 public class PaymentEventHandler {
     private static final Logger log = LoggerFactory.getLogger(PaymentEventHandler.class);
 
-    /**
-     * Sipariş bulunamazsa bu kadar beklenir: sipariş işlemi hâlâ sürüyor olabilir.
-     * Olay bundan eskiyse sipariş gerçekten yok demektir (işlem geri alınmış).
-     */
     static final Duration ORPHAN_AFTER = Duration.ofMinutes(2);
 
     private final PaymentResultWaiters waiters;
     private final ProcessedMessages processed;
     private final PaymentRepository payments;
     private final PaymentService paymentService;
-    private final ExtraPaymentRefunder refunder;
+    private final ExtraPaymentAlerts extraPayments;
     private final Clock clock;
 
     @Autowired
     public PaymentEventHandler(ProcessedMessages processed, PaymentRepository payments,
-                               PaymentService paymentService, ExtraPaymentRefunder refunder,
+                               PaymentService paymentService, ExtraPaymentAlerts extraPayments,
                                PaymentResultWaiters waiters) {
-        this(processed, payments, paymentService, refunder, waiters, Clock.systemUTC());
+        this(processed, payments, paymentService, extraPayments, waiters, Clock.systemUTC());
     }
 
     PaymentEventHandler(ProcessedMessages processed, PaymentRepository payments,
-                        PaymentService paymentService, ExtraPaymentRefunder refunder,
+                        PaymentService paymentService, ExtraPaymentAlerts extraPayments,
                         PaymentResultWaiters waiters, Clock clock) {
         this.waiters = waiters;
         this.processed = processed;
         this.payments = payments;
         this.paymentService = paymentService;
-        this.refunder = refunder;
+        this.extraPayments = extraPayments;
         this.clock = clock;
     }
 
@@ -77,11 +63,46 @@ public class PaymentEventHandler {
         switch (data.status()) {
             case "SUCCEEDED", "VERIFYING" -> applyMoneyTaken(event, data);
             // Para çekilmedi: senkron akış siparişi zaten doğru bıraktı (bekliyor veya geri alındı).
-            case "FAILED" -> log.debug("Sipariş {} denemesi başarısız; yapılacak bir şey yok", data.orderId());
+            case "FAILED" -> recordFailure(event, data);
             // İadeyi admin iptali ya da bu sınıf başlatır ve siparişi o anda günceller; olay yalnızca bilgi.
             case "REFUNDED" -> log.debug("Sipariş {} iade edildi", data.orderId());
             default -> log.warn("Tanınmayan ödeme durumu '{}' (mesaj {}); görmezden gelindi", data.status(), messageId);
         }
+    }
+
+    /**
+     * Para çekilmedi.
+     *  - Kuyrukla giden 2D isteğiyse sebep kaydedilir (ekran "reddedildi: sebep" gösterir); sipariş
+     *    beklemede kalır, kullanıcı başka kartla tekrar deneyebilir.
+     *  - Ödeme incelemedeyse (sonucu belirsizdi, şimdi "çekilmedi" diye netleşti) sipariş incelemeden
+     *    çıkar ve beklemeye döner: kullanıcı tekrar ödeyebilir ya da süre dolunca stok bırakılır.
+     *    Aksi hâlde sipariş sonsuza kadar incelemede kalırdı.
+     */
+    private void recordFailure(PaymentEvent event, PaymentEvent.Data data) {
+        payments.findByOrderIdForUpdate(data.orderId())
+                .filter(payment -> data.attemptId().equals(payment.getAttemptId()))
+                .ifPresent(payment -> {
+                    if (isOlderThanApplied(event, payment)) {
+                        log.info("Sipariş {} için eski olay (sıra {} ≤ {}) atlandı", data.orderId(), event.sequence(), payment.getLastEventSequence());
+                        return;
+                    }
+                    if (event.sequence() != null) {
+                        payment.setLastEventSequence(Math.max(event.sequence(),
+                                payment.getLastEventSequence() == null ? 0 : payment.getLastEventSequence()));
+                    }
+                    if (payment.getLastAttemptStatus() != null) {
+                        payment.setLastAttemptStatus("FAILED");
+                        payment.setFailureReason(data.failureReason());
+                    }
+                    if (payment.getStatus() == PaymentStatus.REVIEW) {
+                        payment.setStatus(PaymentStatus.PENDING);
+                        payment.getOrder().setStatus(OrderStatus.PAYMENT_PENDING);
+                        payment.setFailureReason(data.failureReason());
+                        log.info("Sipariş {} incelemeden çıktı: para çekilmedi ({})", data.orderId(), data.failureReason());
+                    } else {
+                        log.info("Sipariş {} ödemesi başarısız: {}", data.orderId(), data.failureReason());
+                    }
+                });
     }
 
     /** Para çekildi (SUCCEEDED) veya çekilmiş olabilir (VERIFYING). */
@@ -92,7 +113,7 @@ public class PaymentEventHandler {
                 // Büyük ihtimalle sipariş işlemi daha bitmedi. Biraz sonra tekrar dene.
                 throw PaymentEventException.retryLater("Sipariş " + data.orderId() + " henüz görünmüyor.");
             }
-            refunder.refund(data, PaymentAlert.Kind.ORPHAN_PAYMENT,
+            extraPayments.record(data, PaymentAlert.Kind.ORPHAN_PAYMENT,
                     "Sipariş " + data.orderId() + " bulunamadı ama ödeme alındı.");
             return;
         }
@@ -119,7 +140,7 @@ public class PaymentEventHandler {
             }
             case PAID, REVIEW, REFUNDED -> {
                 if (!sameAttempt) {
-                    refunder.refund(data, PaymentAlert.Kind.SECOND_PAYMENT,
+                    extraPayments.record(data, PaymentAlert.Kind.SECOND_PAYMENT,
                             "Sipariş " + data.orderId() + " zaten ödenmişken ikinci bir ödeme alındı.");
                     return;
                 }
@@ -130,12 +151,11 @@ public class PaymentEventHandler {
                 }
             }
             // EXPIRED, CANCELLED, FAILED: sipariş artık yok sayılır; stok çoktan bırakıldı.
-            default -> refunder.refund(data, PaymentAlert.Kind.LATE_PAYMENT,
+            default -> extraPayments.record(data, PaymentAlert.Kind.LATE_PAYMENT,
                     "Sipariş " + data.orderId() + " " + payment.getStatus() + " durumundayken ödeme geldi.");
         }
     }
 
-    /** Olayların sırası karışırsa (paralel dinleyiciler) eskisi yenisinin üzerine yazılmasın. */
     private static boolean isOlderThanApplied(PaymentEvent event, Payment payment) {
         return event.sequence() != null && payment.getLastEventSequence() != null
                 && event.sequence() <= payment.getLastEventSequence();

@@ -72,6 +72,15 @@ public class IyzicoServiceClient {
                 .body(AttemptResult.class));
     }
 
+    /** iyzico Ödeme Formu dönüşü: servis token'ı doğrular ve sonucu iyzico'ya sorar. */
+    public AttemptResult completeCheckoutForm(UUID attemptId, String token) {
+        return call(() -> http.post().uri("/payments/{id}/checkout-form-complete", attemptId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new CheckoutFormCallback(token))
+                .retrieve()
+                .body(AttemptResult.class));
+    }
+
     public AttemptResult completeThreeDS(UUID attemptId, ThreeDSCallback callback) {
         return call(() -> http.post().uri("/payments/{id}/threeds-complete", attemptId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -124,8 +133,9 @@ public class IyzicoServiceClient {
     // ---------------------------------------------------------------- istek/cevap gövdeleri
 
     /** Tutarlar JSON'da metin olarak gider ("25.00"): karşı taraf float'a çevirmesin. */
+    /** mode: "checkout-form" (kart yok, iyzico formu) veya "direct" (kart bilgisiyle). */
     public record StartPayment(Long orderId, @JsonFormat(shape = JsonFormat.Shape.STRING) BigDecimal amount, boolean threeDS, String clientIp,
-                               Buyer buyer, Address address, List<BasketItem> items, Card card) {
+                               Buyer buyer, Address address, List<BasketItem> items, Card card, String mode) {
     }
 
     public record Buyer(String id, String firstName, String lastName, String email, String phone,
@@ -152,7 +162,11 @@ public class IyzicoServiceClient {
 
     /** status: CREATED | SENT | AWAITING_3DS | CONFIRM_SENT | SUCCEEDED | FAILED | VERIFYING | REFUNDED */
     public record AttemptResult(UUID attemptId, Long orderId, String status, String iyzicoPaymentId,
-                                String failureReason, String traceId, String threeDSHtmlContent) {
+                                String failureReason, String traceId, String threeDSHtmlContent,
+                                String checkoutFormContent) {
+    }
+
+    private record CheckoutFormCallback(String token) {
     }
 
     private record RefundBody(String clientIp) {

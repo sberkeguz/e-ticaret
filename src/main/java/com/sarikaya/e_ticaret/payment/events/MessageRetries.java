@@ -9,12 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
-
-/**
- * İşlenemeyen mesajın gideceği yer: bekleme kuyruğu (5 sn → 30 sn → 2 dk) ya da DLQ.
- * Mesaj, RabbitMQ yeni yerini onaylamadan bırakılmaz; onay gelmezse hata fırlar ve
- * ana kuyruğun kendi DLQ ayarı devreye girer. Hiçbir mesaj sessizce kaybolmaz.
- */
 @Component
 public class MessageRetries {
     private static final Logger log = LoggerFactory.getLogger(MessageRetries.class);

@@ -7,8 +7,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-
-/** Her gece 03:15'te, processedRetentionDays günden eski "işlendi" kayıtlarını siler. */
 @Component
 public class ProcessedMessagesCleanup {
     private static final Logger log = LoggerFactory.getLogger(ProcessedMessagesCleanup.class);

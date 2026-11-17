@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** Admin paneli: işlenemeyen (DLQ'ya düşen) ödeme mesajları. (/api/admin/** yalnızca ADMIN) */
 @RestController
 @RequestMapping("/api/admin/dead-letters")
 public class AdminDeadLetterController {
@@ -30,7 +29,6 @@ public class AdminDeadLetterController {
         return new DeadLetterList(deadLetters.count(), deadLetters.list());
     }
 
-    /** Sorun giderildiyse (ör. eksik sipariş bulundu) mesajı tekrar işlemeye gönderir. */
     @PostMapping("/{messageId}/replay")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void replay(@PathVariable String messageId) {
@@ -39,7 +37,6 @@ public class AdminDeadLetterController {
         }
     }
 
-    /** Önemsiz olduğuna karar verilen mesajı siler. */
     @DeleteMapping("/{messageId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void discard(@PathVariable String messageId) {

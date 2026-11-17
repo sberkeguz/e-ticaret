@@ -32,7 +32,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
+/** iyzico-service'e senkron giden (3D) ödeme yolundaki kullanıcı kilidini sınar. */
+@SpringBootTest(properties = {"spring.rabbitmq.listener.simple.auto-startup=false"})
 class PaymentConcurrencyTest {
     private static final String KEY = "6f1c2a8e-3b4d-4c5e-9f00-112233445566";
     @Autowired private PaymentService service;
@@ -60,7 +61,7 @@ class PaymentConcurrencyTest {
         cartItems.saveAndFlush(cartItem);
         CheckoutRequest request = new CheckoutRequest("Test", "Buyer", "05551234567",
                 "test@example.com", "11111111111", "Istanbul", "Kadikoy", "Moda", "Test",
-                List.of(new OrderRequest.Item(product.getId(), 1)), false,
+                List.of(new OrderRequest.Item(product.getId(), 1)), true,
                 new CheckoutRequest.Card("Test Buyer", "5528790000000008", "12", "2030", "123"));
         CountDownLatch providerStarted = new CountDownLatch(1);
         CountDownLatch releaseProvider = new CountDownLatch(1);
@@ -71,7 +72,7 @@ class PaymentConcurrencyTest {
                 providerStarted.countDown();
                 if (!releaseProvider.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("Provider timeout");
                 return new IyzicoServiceClient.AttemptResult(UUID.randomUUID(), null, "SUCCEEDED",
-                        "test-" + UUID.randomUUID(), null, "t", null);
+                        "test-" + UUID.randomUUID(), null, "t", null, null);
             });
             var first = executor.submit(() -> service.initialize(user.getUsername(), request, "127.0.0.1", KEY));
             try {

@@ -14,9 +14,13 @@ export interface Transition {
   note: string;
   iyzicoPaymentId?: string | null;
   failureReason?: string | null;
+  /** iyzico Ödeme Formu token'ı (form başlatılınca yazılır). */
+  checkoutToken?: string | null;
 }
 
 export interface NewAttempt {
+  /** Verilmezse üretilir. Kuyrukla gelen 2D isteğinde backend'in verdiği numara kullanılır. */
+  id?: string;
   orderId: number;
   idempotencyKey: string;
   requestHash: string;
@@ -59,7 +63,7 @@ export class AttemptStore {
       const now = new Date();
       const attempt = await tx.paymentAttempt.create({
         data: {
-          id: randomUUID(),
+          id: input.id ?? randomUUID(),
           orderId: BigInt(input.orderId),
           idempotencyKey: input.idempotencyKey,
           requestHash: input.requestHash,
@@ -142,6 +146,7 @@ export async function record(tx: Tx, attempt: PaymentAttempt, transition: Transi
       status: transition.to,
       updatedAt: now,
       ...(transition.iyzicoPaymentId != null && { iyzicoPaymentId: transition.iyzicoPaymentId }),
+      ...(transition.checkoutToken != null && { checkoutToken: transition.checkoutToken }),
       ...(transition.failureReason != null && { failureReason: limit(transition.failureReason) }),
     },
   });

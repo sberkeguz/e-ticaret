@@ -7,11 +7,11 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** Siparişlerim'den, ödemesi bekleyen bir siparişi ödemek için. */
 public record PayOrderRequest(
         @NotBlank @Email @Size(max = 254) String email,
         @NotBlank @Pattern(regexp = "\\d{11}", message = "T.C. kimlik numarası 11 haneli olmalı.")
         String identityNumber,
         boolean forceThreeDS,
-        @NotNull(message = "Kart bilgileri zorunlu.") @Valid CheckoutRequest.Card card) {
+        /** Boşsa (önerilen) müşteri iyzico'nun ödeme formunu doldurur. */
+        @Valid CheckoutRequest.Card card) {
 }

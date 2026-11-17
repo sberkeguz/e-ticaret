@@ -65,7 +65,7 @@ public class SecurityConfig {
                         // API dokümanı (Swagger UI). Yalnızca doküman; uçların kendisi yine yetki ister.
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         // Login, register ve hata sayfası herkese açık
-                        .requestMatchers("/api/auth/**", "/api/user/**", "/api/payments/callback", "/error").permitAll()
+                        .requestMatchers("/api/auth/**", "/api/user/**", "/api/payments/callback", "/api/payments/form-callback", "/error").permitAll()
                         // Admin endpoint'leri sadece ADMIN rolüne açık
                         // (User.getAuthorities içinde "ROLE_" + role.name() olmalı)
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
@@ -106,6 +106,8 @@ public class SecurityConfig {
         paymentCallbackConfiguration.setAllowedMethods(List.of("POST"));
         paymentCallbackConfiguration.setAllowedHeaders(List.of("*"));
         source.registerCorsConfiguration("/api/payments/callback", paymentCallbackConfiguration);
+        // iyzico Ödeme Formu dönüşü de aynı türden: token ile doğrulanır, sonuç iyzico'ya sorulur.
+        source.registerCorsConfiguration("/api/payments/form-callback", paymentCallbackConfiguration);
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }

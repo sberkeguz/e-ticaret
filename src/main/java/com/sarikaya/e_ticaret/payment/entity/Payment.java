@@ -23,15 +23,12 @@ public class Payment {
     @JoinColumn(name = "order_id", nullable = false, unique = true)
     private Order order;
 
-    /** iyzico ödeme numarası. */
     @Column(unique = true)
     private String token;
 
-    /** IyzicoService'teki son ödeme denemesinin numarası (iyzico'ya conversationId olarak gider). */
     @Column(unique = true)
     private UUID attemptId;
 
-    /** Bu ödemeye uygulanan son olayın sıra numarası; daha eski olaylar uygulanmaz. */
     private Long lastEventSequence;
 
     @Enumerated(EnumType.STRING)
@@ -40,4 +37,18 @@ public class Payment {
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
+
+    /**
+     * Kuyrukla giden 2D isteğinin son bilinen durumu (olaylardan güncellenir): REQUESTED, SUCCEEDED,
+     * FAILED, VERIFYING. Boşsa ödeme kuyruksuz yoldan (3D) yapılıyordur.
+     */
+    @Column(length = 30)
+    private String lastAttemptStatus;
+
+    /** Başarısız denemenin kullanıcıya gösterilecek sebebi (ör. "Kart limiti yetersiz"). */
+    @Column(length = 500)
+    private String failureReason;
+
+    /** iyzico-service bu andan sonra gelen 2D isteğini iyzico'ya göndermez. */
+    private Instant chargeDeadline;
 }

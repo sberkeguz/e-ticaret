@@ -17,10 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * DLQ'daki (işlenemeyen) mesajlar için admin araçları: listele, tekrar işle, sil.
- * Mesajlar listelenirken kuyruktan alınıp hemen geri bırakılır; hiçbiri kaybolmaz.
- */
 @Component
 public class DeadLetters {
     private static final Logger log = LoggerFactory.getLogger(DeadLetters.class);
@@ -64,7 +60,6 @@ public class DeadLetters {
         return result == null ? List.of() : result;
     }
 
-    /** Mesajı ana kuyruğa geri koyar; tekrar sayacı sıfırlanır. Bulunamazsa false. */
     public boolean replay(String messageId) {
         return Boolean.TRUE.equals(take(messageId, (channel, message) -> {
             AMQP.BasicProperties props = message.getProps();
@@ -81,7 +76,6 @@ public class DeadLetters {
         }));
     }
 
-    /** Mesajı kalıcı olarak siler (admin "önemsiz" dedi). Bulunamazsa false. */
     public boolean discard(String messageId) {
         return Boolean.TRUE.equals(take(messageId, (channel, message) ->
                 log.warn("DLQ mesajı {} admin tarafından silindi", messageId)));
@@ -91,7 +85,6 @@ public class DeadLetters {
         void apply(Channel channel, GetResponse message) throws Exception;
     }
 
-    /** DLQ'da mesajı arar; bulursa işlemi yapıp onaylar (kuyruktan çıkar), diğerlerini geri bırakır. */
     private Boolean take(String messageId, MessageAction action) {
         return rabbit.execute(channel -> {
             List<Long> others = new ArrayList<>();

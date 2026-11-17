@@ -4,7 +4,9 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsBoolean,
+  IsDefined,
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -12,6 +14,7 @@ import {
   IsString,
   Matches,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from "class-validator";
 import type { AttemptStatus } from "../attempt/attempt-status.js";
@@ -67,7 +70,21 @@ export class CreatePaymentRequest {
   @ValidateNested() @Type(() => BuyerDto) buyer!: BuyerDto;
   @ValidateNested() @Type(() => AddressDto) address!: AddressDto;
   @ArrayNotEmpty() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => BasketItemDto) items!: BasketItemDto[];
-  @ValidateNested() @Type(() => CardDto) card!: CardDto;
+  @ApiPropertyOptional({
+    enum: ["direct", "checkout-form"],
+    description: "checkout-form: kart bilgisi bize gelmez; müşteri iyzico'nun formunu doldurur (önerilen)",
+  })
+  @IsOptional() @IsIn(["direct", "checkout-form"]) mode: PaymentMode = "direct";
+  /** Yalnızca "direct" akışta. */
+  @ValidateIf((request: CreatePaymentRequest) => request.mode !== "checkout-form")
+  @IsDefined({ message: "Kartla ödeme için kart bilgisi gerekli" }) @ValidateNested() @Type(() => CardDto) card?: CardDto;
+}
+
+export type PaymentMode = "direct" | "checkout-form";
+
+/** iyzico Ödeme Formu dönüşü: iyzico yalnızca formun token'ını gönderir. */
+export class CheckoutFormCallback {
+  @IsString() @IsNotEmpty() @MaxLength(100) token!: string;
 }
 
 /** iyzico'nun 3D dönüş alanları; backend olduğu gibi iletir. */
@@ -106,4 +123,6 @@ export class PaymentAttemptView {
   traceId!: string;
   @ApiPropertyOptional({ description: "Yalnızca 3D başlatıldığı cevapta dolu: bankanın SMS sayfası (HTML)" })
   threeDSHtmlContent!: string | null;
+  @ApiPropertyOptional({ description: "Yalnızca Ödeme Formu başlatıldığı cevapta dolu: iyzico formunu açan HTML/betik" })
+  checkoutFormContent!: string | null;
 }

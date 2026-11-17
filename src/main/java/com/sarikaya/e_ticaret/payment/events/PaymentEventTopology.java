@@ -15,19 +15,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Ödeme olaylarının RabbitMQ düzeni. Backend açılırken tanımlanır (zaten varsa dokunulmaz).
- *
- * <pre>
- * IyzicoService ──▶ [payments] (topic) ──payment.#──▶ backend.payment-events ──▶ dinleyici
- *                        │ hiçbir kuyruğa gitmeyen                                 │ hata
- *                        ▼                                                         ▼
- *                 payments.unrouted                         retry.1 (5 sn) → retry.2 (30 sn) → retry.3 (2 dk)
- *                                                           │ süre dolunca ana kuyruğa geri döner
- *                                                           ▼ 3 denemede de olmadıysa
- *                                                  backend.payment-events.dlq  (admin RabbitMQ arayüzünde görür)
- * </pre>
- */
 @Configuration
 public class PaymentEventTopology {
     public static final String EXCHANGE = "payments";
@@ -36,6 +23,14 @@ public class PaymentEventTopology {
 
     public static final String QUEUE = "backend.payment-events";
     public static final String DEAD_LETTER_QUEUE = QUEUE + ".dlq";
+
+    /**
+     * 2D ödeme isteği (komut): backend gönderir, iyzico-service işler. Olay anahtarlarından ("payment.#")
+     * ayrı tutulur ki backend kendi komutunu geri almasın. Kuyruğu iki taraf da aynı ayarlarla tanımlar;
+     * iyzico-service kapalıyken bile istek kuyrukta bekler.
+     */
+    public static final String CHARGE_ROUTING_KEY = "commands.payment.charge";
+    public static final String CHARGE_QUEUE = "iyzico.charge-requests";
 
     /** Denemeler arası bekleme giderek uzar. Sırası önemli: i. tekrar i. kuyruktan geçer. */
     public static final List<Duration> RETRY_DELAYS = List.of(
@@ -63,6 +58,9 @@ public class PaymentEventTopology {
                 unrouted, unroutedQueue, BindingBuilder.bind(unroutedQueue).to(unrouted),
                 payments, main, deadLetters,
                 BindingBuilder.bind(main).to(payments).with("payment.#")));
+        Queue chargeRequests = QueueBuilder.durable(CHARGE_QUEUE).build();
+        all.add(chargeRequests);
+        all.add(BindingBuilder.bind(chargeRequests).to(payments).with(CHARGE_ROUTING_KEY));
 
         // Bekleme kuyrukları: kimse dinlemez; mesajın süresi (TTL) dolunca ana kuyruğa geri döner.
         for (int attempt = 1; attempt <= RETRY_DELAYS.size(); attempt++) {

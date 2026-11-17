@@ -1,0 +1,29 @@
+# Bağımlılık güncellemeleri: haftada bir kontrol edilir, yeni sürümler (güvenlik yamaları dahil)
+# PR olarak gelir; CI o PR'da testleri çalıştırır. Küçük güncellemeler tek PR'da toplanır.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /admin-panel
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /services/iyzico-service
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
+  - package-ecosystem: docker
+    directories: [/, /admin-panel, /services/iyzico-service]
+    schedule: { interval: weekly }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

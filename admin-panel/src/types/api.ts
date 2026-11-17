@@ -47,6 +47,14 @@ export interface ProductResponse {
     testProduct: boolean;
 }
 
+export interface ProductPageResponse {
+    items: ProductResponse[];
+    page: number;
+    size: number;
+    totalItems: number;
+    totalPages: number;
+}
+
 export interface ProductRequest {
     name: string;
     description?: string | null;
@@ -179,23 +187,26 @@ export interface CheckoutRequest {
     address: string;
     items: { productId: number; quantity: number }[];
     forceThreeDS: boolean;
-    card: CheckoutCard;
+    /** Boşsa (arayüz böyle gönderir) kart bilgisi bize gelmez: iyzico'nun ödeme formu açılır. */
+    card?: CheckoutCard;
 }
 
 export interface PayOrderRequest {
     email: string;
     identityNumber: string;
     forceThreeDS: boolean;
-    card: CheckoutCard;
+    card?: CheckoutCard;
 }
 
-/** "success" | "review" | "failed" | "threeds" | "processing" */
-export type CheckoutResult = "success" | "review" | "failed" | "threeds" | "processing";
+/** form: iyzico ödeme formu açılır (checkoutFormContent dolu). */
+export type CheckoutResult = "success" | "review" | "failed" | "threeds" | "processing" | "form";
 
 export interface CheckoutResponse {
     result: CheckoutResult;
     threeDSHtmlContent: string | null;
     orderId: number | null;
+    /** iyzico ödeme formunu açan içerik (result = form). */
+    checkoutFormContent: string | null;
 }
 
 /** Ödeme sonucu sorusunun cevabı. */

@@ -24,11 +24,10 @@ public record CheckoutRequest(
         @NotBlank @Size(max = 300) String address,
         @NotEmpty @Size(max = 100) @Valid List<OrderRequest.Item> items,
         boolean forceThreeDS,
-        @NotNull(message = "Kart bilgileri zorunlu.") @Valid Card card) {
+        /** Boşsa (önerilen) kart bilgisi bize gelmez: müşteri iyzico'nun ödeme formunu doldurur. */
+        @Valid Card card) {
 
-    /**
-     * Kart bilgileri yalnızca iyzico'ya iletilir; veritabanına yazılmaz ve loglanmaz.
-     */
+
     public record Card(
             @NotBlank(message = "Kart üzerindeki isim zorunlu.") @Size(max = 100) String holderName,
             @NotBlank @Pattern(regexp = "\\d{15,19}", message = "Kart numarası geçersiz.") String number,

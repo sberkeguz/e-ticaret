@@ -8,7 +8,7 @@ import {
   LegacyRefundRequest,
   PaymentAttemptView,
   RefundRequest,
-  ThreeDSCallback,
+  CheckoutFormCallback, ThreeDSCallback,
 } from "./payment.dto.js";
 import { traceIdFrom } from "./trace-ids.js";
 
@@ -74,6 +74,16 @@ export class PaymentController {
     @Body() callback: ThreeDSCallback,
   ): Promise<PaymentAttemptView> {
     return this.payments.completeThreeDS(attemptId, callback);
+  }
+
+  @Post("payments/:attemptId/checkout-form-complete")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "iyzico Ödeme Formu dönüşünü işle", description: "Token denemeyle eşleşmeli; sonuç iyzico'ya sorulur. Aynı dönüş yalnızca bir kez işlenir." })
+  completeCheckoutForm(
+    @Param("attemptId", ParseUUIDPipe) attemptId: string,
+    @Body() callback: CheckoutFormCallback,
+  ): Promise<PaymentAttemptView> {
+    return this.payments.completeCheckoutForm(attemptId, callback);
   }
 
   @Post("payments/:attemptId/verify")

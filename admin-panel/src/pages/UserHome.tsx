@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api";
 import { parentIdsOf } from "../categoryTree";
-import type { CategoryResponse, ProductResponse } from "../types/api";
+import type { Brand, CategoryResponse, ProductPageResponse, ProductResponse } from "../types/api";
 import CategoryPicker from "../components/CategoryPicker";
 import StoreHeader from "../components/StoreHeader";
 import StoreProduct from "../components/StoreProduct";
 
 const getParentIds = (category: CategoryResponse): number[] => parentIdsOf(category);
 
+const PAGE_SIZE = 24;
+
 export default function UserHome() {
     const [categories, setCategories] = useState<CategoryResponse[]>([]);
-    const [allProducts, setAllProducts] = useState<ProductResponse[]>([]);
+    // Ürünler sunucudan sayfa sayfa gelir; filtreler sunucuda uygulanır.
+    const [products, setProducts] = useState<ProductResponse[]>([]);
+    const [totalItems, setTotalItems] = useState(0);
+    const [nextPage, setNextPage] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [brands, setBrands] = useState<Brand[]>([]);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const [searchInput, setSearchInput] = useState("");
@@ -27,16 +34,15 @@ export default function UserHome() {
         let active = true;
         const loadAll = async () => {
             try {
-                const [categoryResponse, productResponse] = await Promise.all([
+                const [categoryResponse, brandResponse] = await Promise.all([
                     apiFetch("/api/user/categories"),
-                    apiFetch("/api/products"),
+                    apiFetch("/api/user/brands"),
                 ]);
-                if (!productResponse.ok) throw new Error("Ürünler yüklenemedi.");
-                const productData = await productResponse.json();
                 const categoryData = categoryResponse.ok ? await categoryResponse.json() : [];
+                const brandData: Brand[] = brandResponse.ok ? await brandResponse.json() : [];
                 if (!active) return;
                 setCategories(categoryData);
-                setAllProducts(productData);
+                setBrands([...brandData].sort((a, b) => a.name.localeCompare(b.name, "tr")));
             } catch (loadError) {
                 if (active) setError((loadError as Error).message || "Sunucuya ulaşılamadı.");
             } finally {
@@ -65,26 +71,57 @@ export default function UserHome() {
         return ids;
     }, [categories]);
 
-    const products = useMemo(() => {
-        const query = search.trim().toLowerCase();
+    /** Filtrelerin sunucuya gidecek hâli (kategori seçilince alt kategorileri de eklenir). */
+    const query = useMemo(() => {
         const deepest = categoryPath.filter((id) => !categoryPath.some((other) => other !== id && collectIds(id).includes(other)));
-        const allowed = new Set(deepest.flatMap(collectIds));
-        return allProducts.filter((product) => {
-            if (query && !product.name?.toLowerCase().includes(query)) return false;
-            if (allowed.size && !(product.categoryIds ?? []).some((id) => allowed.has(id))) return false;
-            if (minPrice && Number(product.price) < Number(minPrice)) return false;
-            if (maxPrice && Number(product.price) > Number(maxPrice)) return false;
-            if (inStock && Number(product.stock ?? 0) <= 0) return false;
-            if (brandIds.length && (product.brandId == null || !brandIds.includes(product.brandId))) return false;
-            return true;
-        });
-    }, [allProducts, search, categoryPath, minPrice, maxPrice, inStock, brandIds, collectIds]);
+        const params = new URLSearchParams({ size: String(PAGE_SIZE) });
+        if (search.trim()) params.set("q", search.trim());
+        const categoryIds = [...new Set(deepest.flatMap(collectIds))];
+        if (categoryIds.length) params.set("categoryIds", categoryIds.join(","));
+        if (minPrice) params.set("minPrice", minPrice);
+        if (maxPrice) params.set("maxPrice", maxPrice);
+        if (inStock) params.set("inStock", "true");
+        if (brandIds.length) params.set("brandIds", brandIds.join(","));
+        return params.toString();
+    }, [search, categoryPath, minPrice, maxPrice, inStock, brandIds, collectIds]);
 
-    const brands = useMemo(() => {
-        const map = new Map();
-        allProducts.forEach((product) => { if (product.brandId != null) map.set(product.brandId, product.brandName); });
-        return [...map].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "tr"));
-    }, [allProducts]);
+    const loadPage = useCallback(async (page: number): Promise<ProductPageResponse> => {
+        const response = await apiFetch(`/api/products/search?${query}&page=${page}`);
+        if (!response.ok) throw new Error("Ürünler yüklenemedi.");
+        return response.json();
+    }, [query]);
+
+    // Filtre değişince ilk sayfa yeniden yüklenir (yazarken her tuşta değil, 300 ms sonra).
+    useEffect(() => {
+        let active = true;
+        const timer = setTimeout(() => {
+            loadPage(0)
+                .then((data) => {
+                    if (!active) return;
+                    setProducts(data.items);
+                    setTotalItems(data.totalItems);
+                    setNextPage(1);
+                    setError("");
+                })
+                .catch((loadError) => { if (active) setError((loadError as Error).message); })
+                .finally(() => { if (active) setLoading(false); });
+        }, 300);
+        return () => { active = false; clearTimeout(timer); };
+    }, [loadPage]);
+
+    const loadMore = async () => {
+        setLoadingMore(true);
+        try {
+            const data = await loadPage(nextPage);
+            setProducts((current) => [...current, ...data.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+            setTotalItems(data.totalItems);
+            setNextPage(nextPage + 1);
+        } catch (loadError) {
+            setError((loadError as Error).message);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     const brandMatches = useMemo(() => {
         const query = searchInput.trim().toLowerCase();
@@ -194,13 +231,22 @@ export default function UserHome() {
                         <div className="store-main-head">
                             <div>
                                 <h2>{hasFilter ? "Arama sonuçları" : "Yeni keşifler"}</h2>
-                                <p>{loading ? "Katalog yükleniyor…" : `${products.length} ürün listeleniyor`}</p>
+                                <p>{loading ? "Katalog yükleniyor…" : `${totalItems} ürün listeleniyor`}</p>
                             </div>
                         </div>
                         {loading ? <div className="loading-state">Mağaza kataloğu hazırlanıyor…</div> : products.length ? (
-                            <div className="store-grid">
-                                {products.map((product) => <StoreProduct key={product.id} product={product} />)}
-                            </div>
+                            <>
+                                <div className="store-grid">
+                                    {products.map((product) => <StoreProduct key={product.id} product={product} />)}
+                                </div>
+                                {products.length < totalItems && (
+                                    <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+                                        <button className="button button-quiet" type="button" disabled={loadingMore} onClick={loadMore}>
+                                            {loadingMore ? "Yükleniyor…" : `Daha fazla göster (${totalItems - products.length})`}
+                                        </button>
+                                    </div>
+                                )}
+                            </>
                         ) : (
                             <div className="surface empty-state">
                                 <div className="empty-icon">⌕</div>

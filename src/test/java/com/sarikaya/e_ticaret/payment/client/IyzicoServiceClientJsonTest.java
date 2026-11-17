@@ -13,7 +13,7 @@ class IyzicoServiceClientJsonTest {
     @Test
     void amountsAreSentAsDecimalText() {
         var request = new IyzicoServiceClient.StartPayment(42L, new BigDecimal("25.00"), false, "127.0.0.1",
-                null, null, List.of(new IyzicoServiceClient.BasketItem("4", "Armut", new BigDecimal("12.50"))), null);
+                null, null, List.of(new IyzicoServiceClient.BasketItem("4", "Armut", new BigDecimal("12.50"))), null, "direct");
 
         String json = JsonMapper.builder().build().writeValueAsString(request);
 

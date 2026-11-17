@@ -41,7 +41,8 @@ class PaymentServiceAdminCancelTest {
     private final IyzicoServiceClient iyzicoService = mock(IyzicoServiceClient.class);
 
     private final PaymentService service = new PaymentService(
-            orders, payments, products, users, cartItems, iyzicoService);
+            orders, payments, products, users, cartItems, iyzicoService,
+            mock(com.sarikaya.e_ticaret.payment.outbox.OutboxRelay.class));
 
     private Order order;
     private Product product;
@@ -70,6 +71,18 @@ class PaymentServiceAdminCancelTest {
 
         when(orders.findById(42L)).thenReturn(Optional.of(order));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
+    }
+
+    @Test
+    void localTwoDPaymentIsRefundedWithoutCallingIyzico() {
+        Payment payment = payment(PaymentStatus.PAID);
+        payment.setAttemptId(null);
+        payment.setToken("LOCAL-abc");
+
+        service.cancelByAdmin(42L, "127.0.0.1");
+
+        assertEquals(PaymentStatus.REFUNDED, payment.getStatus());
+        verifyNoInteractions(iyzicoService);
     }
 
     @Test
@@ -114,7 +127,7 @@ class PaymentServiceAdminCancelTest {
         order.setStatus(OrderStatus.PAYMENT_PENDING);
         Payment payment = payment(PaymentStatus.PENDING);
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
-                ATTEMPT, 42L, "FAILED", null, "Kart reddedildi", "t", null));
+                ATTEMPT, 42L, "FAILED", null, "Kart reddedildi", "t", null, null));
 
         service.cancelByAdmin(42L, "127.0.0.1");
 
@@ -129,7 +142,7 @@ class PaymentServiceAdminCancelTest {
         order.setStatus(OrderStatus.PAYMENT_PENDING);
         Payment payment = payment(PaymentStatus.PENDING);
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(new IyzicoServiceClient.AttemptResult(
-                ATTEMPT, 42L, "SENT", null, null, "t", null));
+                ATTEMPT, 42L, "SENT", null, null, "t", null, null));
 
         assertThrows(BadRequestException.class, () -> service.cancelByAdmin(42L, "127.0.0.1"));
         assertEquals(PaymentStatus.PENDING, payment.getStatus());

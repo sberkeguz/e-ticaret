@@ -14,6 +14,7 @@ import { PaymentAttemptService } from "./payment/payment-attempt.service.js";
 import { PrismaService } from "./prisma.service.js";
 import { IyzicoApiGateway } from "./provider/iyzico-api.gateway.js";
 import { IyzicoKeepWarm } from "./provider/iyzico-keep-warm.js";
+import { ChargeRequestsConsumer } from "./events/charge-requests.consumer.js";
 import { IyzicoGateway } from "./provider/iyzico.gateway.js";
 
 @Module({
@@ -26,6 +27,7 @@ import { IyzicoGateway } from "./provider/iyzico.gateway.js";
     BackgroundWork,
     Reconciler,
     IyzicoKeepWarm,
+    ChargeRequestsConsumer,
     OutboxRelay,
     OutboxCleanup,
     { provide: IyzicoGateway, useClass: IyzicoApiGateway },

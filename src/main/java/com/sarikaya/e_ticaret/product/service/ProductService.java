@@ -8,6 +8,9 @@ import com.sarikaya.e_ticaret.product.dto.ProductRequest;
 import com.sarikaya.e_ticaret.product.dto.ProductResponse;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
+import com.sarikaya.e_ticaret.product.dto.ProductPageResponse;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +46,17 @@ public class ProductService {
                 .map(ProductResponse::from)
                 .toList();
     }
+
+    /** Mağaza listesi: filtreler veritabanında uygulanır, sonuç sayfa sayfa döner (en fazla 60'ar). */
+    @Transactional(readOnly = true)
+    public ProductPageResponse search(ProductSearch search, int page, int size) {
+        var found = productRepository.findAll(search.toSpecification(),
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, MAX_PAGE_SIZE), Sort.by("id")));
+        return new ProductPageResponse(found.getContent().stream().map(ProductResponse::from).toList(),
+                found.getNumber(), found.getSize(), found.getTotalElements(), found.getTotalPages());
+    }
+
+    private static final int MAX_PAGE_SIZE = 60;
 
     @Transactional(readOnly = true)
     public ProductResponse getActive(Long id, boolean includeTestProducts) {

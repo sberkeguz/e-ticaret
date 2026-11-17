@@ -2,7 +2,7 @@ package com.sarikaya.e_ticaret.payment.events;
 
 import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.order.entity.Order;
-import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentRefunder;
+import com.sarikaya.e_ticaret.payment.alerts.ExtraPaymentAlerts;
 import com.sarikaya.e_ticaret.payment.alerts.PaymentAlert;
 import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
@@ -37,11 +37,11 @@ class PaymentEventHandlerTest {
     private final ProcessedMessages processed = mock(ProcessedMessages.class);
     private final PaymentRepository payments = mock(PaymentRepository.class);
     private final PaymentService paymentService = mock(PaymentService.class);
-    private final ExtraPaymentRefunder refunder = mock(ExtraPaymentRefunder.class);
+    private final ExtraPaymentAlerts extraPayments = mock(ExtraPaymentAlerts.class);
     /** Testte "şimdi" = olay zamanı + 30 sn (olay tazedir). */
     private Clock clock = Clock.fixed(Instant.parse("2026-11-12T10:00:30Z"), ZoneOffset.UTC);
     private PaymentEventHandler handler() {
-        return new PaymentEventHandler(processed, payments, paymentService, refunder, new PaymentResultWaiters(), clock);
+        return new PaymentEventHandler(processed, payments, paymentService, extraPayments, new PaymentResultWaiters(), clock);
     }
 
     @Test
@@ -50,7 +50,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
-        verifyNoInteractions(payments, paymentService, refunder);
+        verifyNoInteractions(payments, paymentService, extraPayments);
     }
 
     @Test
@@ -105,7 +105,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
-        verify(refunder).refund(any(), eq(PaymentAlert.Kind.ORPHAN_PAYMENT), anyString());
+        verify(extraPayments).record(any(), eq(PaymentAlert.Kind.ORPHAN_PAYMENT), anyString());
     }
 
     @Test
@@ -115,7 +115,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
-        verify(refunder).refund(argThatAttempt(ATTEMPT), eq(PaymentAlert.Kind.SECOND_PAYMENT), anyString());
+        verify(extraPayments).record(argThatAttempt(ATTEMPT), eq(PaymentAlert.Kind.SECOND_PAYMENT), anyString());
         verify(paymentService, never()).applyAttemptResult(any(), any(), anyString());
     }
 
@@ -126,7 +126,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("VERIFYING", ATTEMPT));
 
-        verify(refunder).refund(argThatAttempt(ATTEMPT), eq(PaymentAlert.Kind.SECOND_PAYMENT), anyString());
+        verify(extraPayments).record(argThatAttempt(ATTEMPT), eq(PaymentAlert.Kind.SECOND_PAYMENT), anyString());
     }
 
     @Test
@@ -136,7 +136,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
-        verify(refunder).refund(any(), eq(PaymentAlert.Kind.LATE_PAYMENT), anyString());
+        verify(extraPayments).record(any(), eq(PaymentAlert.Kind.LATE_PAYMENT), anyString());
         assertEquals(PaymentStatus.EXPIRED, payment.getStatus());
     }
 
@@ -147,7 +147,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SUCCEEDED", ATTEMPT));
 
-        verify(refunder).refund(any(), eq(PaymentAlert.Kind.LATE_PAYMENT), anyString());
+        verify(extraPayments).record(any(), eq(PaymentAlert.Kind.LATE_PAYMENT), anyString());
     }
 
     @Test
@@ -156,7 +156,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("REFUNDED", ATTEMPT));
 
-        verifyNoInteractions(payments, paymentService, refunder);
+        verifyNoInteractions(payments, paymentService, extraPayments);
     }
 
     private static PaymentEvent.Data argThatAttempt(UUID attemptId) {
@@ -170,7 +170,63 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("FAILED", ATTEMPT));
 
-        verifyNoInteractions(payments, paymentService, refunder);
+        verifyNoInteractions(paymentService, extraPayments);
+    }
+
+    @Test
+    void failedQueuedTwoDChargeRecordsReasonAndKeepsOrderPending() {
+        Payment payment = payment(PaymentStatus.PENDING, ATTEMPT);
+        payment.setLastAttemptStatus("REQUESTED");
+        allowProcessing();
+        PaymentEvent failed = event("FAILED", ATTEMPT);
+        PaymentEvent.Data data = failed.data();
+
+        handler().handle("m-1", new PaymentEvent(failed.messageId(), failed.type(), failed.version(), failed.occurredAt(),
+                failed.traceId(), new PaymentEvent.Data(data.attemptId(), data.orderId(), data.status(), data.amount(),
+                data.currency(), data.threeDS(), null, "Kart limiti yetersiz"), null));
+
+        assertEquals("FAILED", payment.getLastAttemptStatus());
+        assertEquals("Kart limiti yetersiz", payment.getFailureReason());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+        verifyNoInteractions(paymentService, extraPayments);
+    }
+
+    @Test
+    void reviewThatTurnsOutNotChargedGoesBackToPending() {
+        // Sonucu belirsizdi (VERIFYING → inceleme); iyzico'da kayıt çıkmadı, servis "başarısız" yayınladı.
+        Payment payment = payment(PaymentStatus.REVIEW, ATTEMPT);
+        payment.getOrder().setStatus(com.sarikaya.e_ticaret.order.entity.OrderStatus.PAYMENT_REVIEW);
+        payment.setLastEventSequence(5L);
+        allowProcessing();
+
+        handler().handle("m-1", withSequence(event("FAILED", ATTEMPT), 7L));
+
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+        assertEquals(com.sarikaya.e_ticaret.order.entity.OrderStatus.PAYMENT_PENDING, payment.getOrder().getStatus());
+        assertEquals(7L, payment.getLastEventSequence());
+        verifyNoInteractions(paymentService, extraPayments);
+    }
+
+    @Test
+    void staleFailureNeverReopensPaidOrder() {
+        Payment payment = payment(PaymentStatus.PAID, ATTEMPT);
+        payment.setLastEventSequence(9L);
+        allowProcessing();
+
+        handler().handle("m-1", withSequence(event("FAILED", ATTEMPT), 4L));
+
+        assertEquals(PaymentStatus.PAID, payment.getStatus());
+    }
+
+    @Test
+    void failureOfAnOlderAttemptDoesNotTouchCurrentRequest() {
+        Payment payment = payment(PaymentStatus.PENDING, UUID.randomUUID());
+        payment.setLastAttemptStatus("REQUESTED");
+        allowProcessing();
+
+        handler().handle("m-1", event("FAILED", ATTEMPT));
+
+        assertEquals("REQUESTED", payment.getLastAttemptStatus());
     }
 
     @Test
@@ -179,7 +235,7 @@ class PaymentEventHandlerTest {
 
         handler().handle("m-1", event("SOMETHING_NEW", ATTEMPT));
 
-        verifyNoInteractions(payments, paymentService, refunder);
+        verifyNoInteractions(payments, paymentService, extraPayments);
     }
 
     @Test
@@ -193,7 +249,7 @@ class PaymentEventHandlerTest {
 
         assertEquals(PaymentStatus.PAID, payment.getStatus());
         assertEquals(7L, payment.getLastEventSequence());
-        verifyNoInteractions(paymentService, refunder);
+        verifyNoInteractions(paymentService, extraPayments);
     }
 
     @Test

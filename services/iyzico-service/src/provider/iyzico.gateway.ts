@@ -25,6 +25,15 @@ export abstract class IyzicoGateway {
 
   abstract refund(iyzicoPaymentId: string, amount: string, clientIp: string, conversationId: string): Promise<RefundOutcome>;
 
+  /** Ödeme Formunu başlatır: kart bilgisi istemez, para çekmez; formu açan içeriği ve token'ı döner. */
+  abstract startCheckoutForm(attemptId: string, request: CreatePaymentRequest): Promise<CheckoutFormStart>;
+
+  /**
+   * Formun sonucunu token ile sorar. Müşteri formu henüz tamamlamadıysa ya da cevap kesin değilse
+   * UNCERTAIN döner (para çekilmedi denemek için yeterli değildir).
+   */
+  abstract retrieveCheckoutForm(expected: Expected, token: string): Promise<ChargeOutcome>;
+
   /** 3D dönüşündeki imza geçerli mi? İmza alanı yoksa false. */
   abstract isCallbackSignatureValid(callback: ThreeDSCallback): boolean;
 }
@@ -43,7 +52,12 @@ export type ChargeResult =
   /** Kart reddedildi; para çekilmedi. */
   | "DECLINED"
   /** Para çekilmiş olabilir ama emin değiliz (fraud incelemesi, imza tutmadı, cevap belirsiz). */
-  | "UNCERTAIN";
+  | "UNCERTAIN"
+  /**
+   * Yalnız sorguda: iyzico "bu ödemenin kaydı yok" dedi. Tek başına "çekilmedi" demek için yeterli
+   * sayılmaz (istek o an iyzico'da işleniyor olabilir); servis bunu belli bir süre boyunca görürse karar verir.
+   */
+  | "NOT_FOUND";
 
 export interface ChargeOutcome {
   result: ChargeResult;
@@ -55,6 +69,14 @@ export interface ThreeDSStart {
   started: boolean;
   iyzicoPaymentId: string | null;
   htmlContent: string | null;
+  message: string | null;
+}
+
+export interface CheckoutFormStart {
+  started: boolean;
+  token: string | null;
+  /** iyzico'nun formu açan HTML/betik içeriği */
+  content: string | null;
   message: string | null;
 }
 

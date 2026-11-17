@@ -12,7 +12,8 @@ export function requestFingerprint(request: CreatePaymentRequest): string {
     String(request.orderId),
     plain(request.amount),
     String(request.threeDS),
-    request.card.number.slice(-4),
+    request.mode,
+    request.card?.number.slice(-4) ?? "",
     items,
   ].join("|");
   return createHash("sha256").update(canonical, "utf8").digest("hex");

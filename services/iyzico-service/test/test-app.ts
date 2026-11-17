@@ -23,6 +23,7 @@ function testConfig(overrides: Partial<AppConfig>): AppConfig {
     reconcileIntervalMs: 0,
     cleanupIntervalMs: 0,
     outboxListen: false,
+    chargeConsumer: false,
     iyzico: { ...base.iyzico, keepWarmIntervalMs: 0 },
     ...overrides,
   };

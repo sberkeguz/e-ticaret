@@ -62,10 +62,6 @@ public class PaymentController {
                 idempotencyKey);
     }
 
-    /**
-     * "Ödemeniz işleniyor..." ekranı sonucu buradan sorar. waitMs verilirse (en fazla 15 sn) ödeme
-     * işlenirken cevap bekletilir ve sonuç gelir gelmez döner; verilmezse hemen o anki durum döner.
-     */
     @GetMapping("/orders/{orderId}/status")
     public DeferredResult<PaymentStatusResponse> status(Authentication auth, @PathVariable Long orderId,
                                                         @RequestParam(defaultValue = "0") long waitMs) {
@@ -78,12 +74,6 @@ public class PaymentController {
         paymentService.cancelPendingOrder(auth.getName(), orderId);
     }
 
-    /**
-     * iyzico 3D Secure dönüşü (tarayıcı üzerinden form POST'u). Bu sayfa ödeme ekranındaki iframe
-     * içinde, ngrok gibi herkese açık bir adresten açılır. Tarayıcılar böyle bir sayfanın iframe'de
-     * localhost'a yönlenmesini engellediği için yönlendirme yerine sonucu postMessage ile ödeme
-     * ekranına bildiriyoruz. Sayfa iframe dışında açılırsa doğrudan Siparişlerim'e gider.
-     */
     @PostMapping("/callback")
     public void callback(
             @RequestParam(required = false) String status,
@@ -101,6 +91,28 @@ public class PaymentController {
             log.warn("3D Secure dönüşü işlenemedi: {}", e.getMessage());
             result = "error";
         }
+        writeResultPage(response, result);
+    }
+
+    /**
+     * iyzico Ödeme Formu dönüşü: iyzico tarayıcıyı buraya POST ettirir (adreste deneme numarası,
+     * gövdede formun token'ı). Sonuç sayfası, 3D dönüşündeki gibi ödeme ekranına haber verir.
+     */
+    @PostMapping("/form-callback")
+    public void formCallback(@RequestParam(required = false) String attempt,
+                             @RequestParam(required = false) String token,
+                             HttpServletResponse response) throws IOException {
+        String result;
+        try {
+            result = paymentService.completeCheckoutForm(attempt, token);
+        } catch (RuntimeException e) {
+            log.warn("Ödeme formu dönüşü işlenemedi: {}", e.getMessage());
+            result = "error";
+        }
+        writeResultPage(response, result);
+    }
+
+    private void writeResultPage(HttpServletResponse response, String result) throws IOException {
         if (!RESULTS.contains(result)) {
             result = "pending";
         }
@@ -118,8 +130,13 @@ public class PaymentController {
                 <script>
                 (function () {
                   var message = { type: "iyzico-payment-result", result: "%2$s" };
-                  if (window.parent && window.parent !== window) {
-                    window.parent.postMessage(message, "%3$s");
+                  // Ödeme ekranındaki çerçevede (veya iyzico formunun içindeki bir alt çerçevede) açıldıysa
+                  // sonucu üst pencerelere bildir; tek başına açıldıysa siparişlere git.
+                  var targets = [];
+                  if (window.parent && window.parent !== window) targets.push(window.parent);
+                  if (window.top && window.top !== window && window.top !== window.parent) targets.push(window.top);
+                  if (targets.length) {
+                    targets.forEach(function (target) { try { target.postMessage(message, "%3$s"); } catch (e) {} });
                   } else {
                     window.location.replace("%1$s");
                   }

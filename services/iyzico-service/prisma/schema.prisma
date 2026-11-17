@@ -40,6 +40,8 @@ model PaymentAttempt {
   status          AttemptStatus
   iyzicoPaymentId String?              @unique(map: "uq_attempt_iyzico_payment_id") @map("iyzico_payment_id") @db.VarChar(50)
   failureReason   String?              @map("failure_reason") @db.VarChar(500)
+  /// iyzico Ödeme Formu token'ı (kartsız akış); doluysa deneme form ile ödeniyor demektir
+  checkoutToken   String?              @unique(map: "uq_attempt_checkout_token") @map("checkout_token") @db.VarChar(100)
   /// W3C trace id; loglarda bu numarayla aranır
   traceId         String               @map("trace_id") @db.VarChar(32)
   createdAt       DateTime             @map("created_at") @db.Timestamptz(3)

@@ -7,8 +7,9 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+# nginx root olmadan çalışır (resmî "unprivileged" imaj, 8080'de dinler).
+FROM nginxinc/nginx-unprivileged:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8080

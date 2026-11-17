@@ -106,6 +106,35 @@ describe("mutabakat işi", () => {
     expect(iyzico.charges).toBe(0);
   });
 
+  it("iyzico'da kaydı olmayan ödeme 10 dk dolmadan kapanmaz; sonra para çekilmedi diye kapanır", async () => {
+    const id = await attemptIn(["CREATED", "SENT", "VERIFYING"], { minutesAgo: 5 });
+    iyzico.inquiryResult = "NOT_FOUND";
+
+    await reconciler.runOnce();
+    expect(await statusOf(id)).toBe("VERIFYING"); // istek o an iyzico'da işleniyor olabilir
+
+    await age(id, 11);
+    await reconciler.runOnce();
+
+    const attempt = await store.get(id);
+    expect(attempt.status).toBe("FAILED");
+    expect(attempt.failureReason).toContain("para çekilmedi");
+    expect(await eventTypes(id)).toEqual(["PaymentVerifying", "PaymentFailed"]);
+    expect(iyzico.charges).toBe(0);
+  });
+
+  it("kaydı bulunamayan ödeme sonradan bulunursa (geç kayıt) başarılı sayılır", async () => {
+    const id = await attemptIn(["CREATED", "SENT", "VERIFYING"], { minutesAgo: 5 });
+    iyzico.inquiryResult = "NOT_FOUND";
+    await reconciler.runOnce();
+
+    await age(id, 6);
+    iyzico.inquiryResult = "PAID";
+    await reconciler.runOnce();
+
+    expect(await statusOf(id)).toBe("SUCCEEDED");
+  });
+
   /** Denemeyi verilen durumlardan geçirip son durumda bırakır ve "dakikalar önce" yapılmış gibi eskitir. */
   async function attemptIn(path: AttemptStatus[], options: { minutesAgo: number; threeDS?: boolean }): Promise<string> {
     const attempt = await store.create({

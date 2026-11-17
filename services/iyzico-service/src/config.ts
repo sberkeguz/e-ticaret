@@ -10,6 +10,8 @@ export interface AppConfig {
   outboxIntervalMs: number;
   /** Yeni olay yazılınca veritabanının haberini (LISTEN/NOTIFY) dinleyip hemen gönder. */
   outboxListen: boolean;
+  /** Backend'in 2D ödeme isteklerini (RabbitMQ komut kuyruğu) dinle. */
+  chargeConsumer: boolean;
   /** Mutabakat işi bu aralıkla çalışır; 0 = kapalı. */
   reconcileIntervalMs: number;
   /** Temizlik işi bu aralıkla çalışır; 0 = kapalı. */
@@ -22,6 +24,8 @@ export interface AppConfig {
     baseUrl: string;
     /** 3D dönüşü tarayıcıdan backend'e gelir (ngrok), backend bu servise iletir. */
     callbackUrl: string;
+    /** iyzico Ödeme Formu dönüşü (backend). Varsayılan: 3D dönüşünün yanındaki /form-callback. */
+    formCallbackUrl: string;
     timeoutMs: number;
     /** Bağlantı + TLS el sıkışması için süre; dolarsa hemen tekrar denenir (istek henüz gitmemiştir). */
     handshakeTimeoutMs: number;
@@ -40,6 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     rabbitmqUrl: env.RABBITMQ_URL ?? "",
     outboxIntervalMs: Number(env.OUTBOX_INTERVAL_MS ?? 1_000),
     outboxListen: env.OUTBOX_LISTEN !== "false",
+    chargeConsumer: env.CHARGE_CONSUMER !== "false",
     reconcileIntervalMs: Number(env.RECONCILE_INTERVAL_MS ?? 60_000),
     cleanupIntervalMs: Number(env.CLEANUP_INTERVAL_MS ?? 60 * 60_000),
     outboxRetentionDays: Number(env.OUTBOX_RETENTION_DAYS ?? 7),
@@ -48,6 +53,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       secretKey: env.IYZIPAY_SECRET_KEY ?? "",
       baseUrl: env.IYZIPAY_BASE_URL ?? "https://sandbox-api.iyzipay.com",
       callbackUrl: env.IYZIPAY_CALLBACK_URL ?? "http://localhost:8080/api/payments/callback",
+      formCallbackUrl: env.IYZIPAY_FORM_CALLBACK_URL
+        ?? new URL("form-callback", env.IYZIPAY_CALLBACK_URL ?? "http://localhost:8080/api/payments/callback").toString(),
       timeoutMs: Number(env.IYZIPAY_TIMEOUT_MS ?? 60_000),
       // 1 sn denendi: sandbox uzun aradan sonra birkaç saniye hiç bağlantı kabul etmediği için
       // 3 deneme de düştü ve ödeme başarısız oldu. Kopmalar ~3,5 sn'de kendiliğinden geliyor;

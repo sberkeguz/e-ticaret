@@ -62,7 +62,7 @@ docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_passwo
 
 - **Mutabakat işi** (iyzico-service, dakikada bir): takılan denemeleri sonuca bağlar. İstek hiç gitmediyse başarısız sayar, cevabı kaybolduysa iyzico'ya sorar (tekrar göndermez), 15 dakikadır bekleyen 3D ekranını kapatır.
 - **Bağlantı ısıtma** (iyzico-service, dakikada bir): iyzico sandbox birkaç dakika sessizlikten sonra (4 dakika bile yetiyor) ilk bağlantıyı ~3 sn bekletip düşürüyor. Servis iyzico'ya küçük bir `HEAD /` isteği atar; düşerse hemen tekrar dener, böylece cezayı ödeme yerine kendisi yer. Para ve kayıtla ilgisi yoktur. Aralık `IYZIPAY_KEEP_WARM_MS` ile değişir (0 = kapalı).
-- **Otomatik iade** (backend): aynı siparişe ikinci ödeme, iptal/süresi dolmuş siparişe geç ödeme ya da siparişi olmayan ödeme gelirse iade edilir ve admin panelindeki "Ödeme uyarıları" kartına düşer.
+- **Fazla ödeme uyarısı** (backend): aynı siparişe ikinci ödeme, iptal/süresi dolmuş siparişe geç ödeme ya da siparişi olmayan ödeme gelirse para **otomatik iade edilmez**; admin panelindeki "Ödeme uyarıları" kartına düşer, admin karar verir.
 
 ### Olaylar (RabbitMQ)
 

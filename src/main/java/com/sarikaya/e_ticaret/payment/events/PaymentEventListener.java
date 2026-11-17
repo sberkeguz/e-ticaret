@@ -6,13 +6,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
-/**
- * backend.payment-events kuyruğunu dinler.
- *
- * Akış: mesajı oku → işle (tek veritabanı işlemi) → metot dönünce Spring mesajı onaylar (ack).
- * Yani iş veritabanına yazılmadan mesaj "alındı" sayılmaz.
- * İşlenemezse mesaj tekrar deneme ya da DLQ kuyruğuna taşınır ve bu kopya onaylanır.
- */
 @Component
 public class PaymentEventListener {
     private final PaymentEventHandler handler;
