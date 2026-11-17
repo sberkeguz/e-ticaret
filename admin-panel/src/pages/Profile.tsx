@@ -29,6 +29,8 @@ const emptyProfile: ProfileForm = {
     firstName: "",
     lastName: "",
     phone: "",
+    email: "",
+    identityNumber: "",
     city: "",
     district: "",
     neighborhood: "",
@@ -142,6 +144,8 @@ export default function Profile() {
                     firstName: profile.firstName,
                     lastName: profile.lastName,
                     phone: profile.phone,
+                    email: profile.email.trim(),
+                    identityNumber: profile.identityNumber,
                     city: profile.city,
                     district: profile.district,
                     neighborhood: profile.neighborhood,
@@ -220,6 +224,8 @@ export default function Profile() {
                             <label style={styles.field}>Ad<input style={styles.input} maxLength={60} value={profile.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
                             <label style={styles.field}>Soyad<input style={styles.input} maxLength={60} value={profile.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
                             <label style={styles.field}>Telefon<input style={styles.input} type="tel" maxLength={20} value={profile.phone} onChange={(event) => update("phone", event.target.value)} placeholder="05xx xxx xx xx" /></label>
+                            <label style={styles.field}>E-posta<input style={styles.input} type="email" maxLength={254} autoComplete="email" value={profile.email} onChange={(event) => update("email", event.target.value)} placeholder="ornek@gmail.com" /></label>
+                            <label style={styles.field}>T.C. kimlik no<input style={styles.input} inputMode="numeric" autoComplete="off" maxLength={11} pattern="\d{11}" title="11 haneli T.C. kimlik numarası" value={profile.identityNumber} onChange={(event) => update("identityNumber", event.target.value.replace(/\D/g, "").slice(0, 11))} /></label>
                             <div style={styles.field}>Kullanıcı adı<div style={styles.usernameRow}><input style={styles.input} value={profile.username} readOnly /><button type="button" onClick={openUsernameDialog} style={styles.secondaryButton}>Değiştir</button></div></div>
                         </div>
                     </section>

@@ -57,6 +57,11 @@ public class User implements UserDetails {
     private String firstName;
     private String lastName;
     private String phone;
+    /** Ödeme sırasında iyzico'ya giden alıcı bilgileri; ödeme formu bunlarla dolar. */
+    @Column(length = 254)
+    private String email;
+    @Column(length = 11)
+    private String identityNumber;
     private String city;
     private String district;
     private String neighborhood;

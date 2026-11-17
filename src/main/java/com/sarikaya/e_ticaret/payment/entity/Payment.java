@@ -39,6 +39,13 @@ public class Payment {
     private Instant createdAt = Instant.now();
 
     /**
+     * Stok rezervasyonu süresinin başladığı an. Sipariş açılınca başlar, ödeme reddedilince yeniden
+     * başlar: ret geç gelse bile (ör. 10 dk süren doğrulama) müşteri tekrar deneyebilir.
+     */
+    @Column(nullable = false)
+    private Instant reservationStartedAt = createdAt;
+
+    /**
      * Kuyrukla giden 2D isteğinin son bilinen durumu (olaylardan güncellenir): REQUESTED, SUCCEEDED,
      * FAILED, VERIFYING. Boşsa ödeme kuyruksuz yoldan (3D) yapılıyordur.
      */

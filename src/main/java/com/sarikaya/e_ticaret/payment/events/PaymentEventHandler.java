@@ -102,6 +102,10 @@ public class PaymentEventHandler {
                     } else {
                         log.info("Sipariş {} ödemesi başarısız: {}", data.orderId(), data.failureReason());
                     }
+                    if (payment.getStatus() == PaymentStatus.PENDING) {
+                        // Ret ne kadar geç gelirse gelsin müşteriye tekrar denemek için tam süre verilir.
+                        payment.setReservationStartedAt(clock.instant());
+                    }
                 });
     }
 

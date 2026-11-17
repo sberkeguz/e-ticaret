@@ -143,6 +143,8 @@ export default function Checkout() {
                     firstName: profile.firstName || current.firstName,
                     lastName: profile.lastName || current.lastName,
                     phone: profile.phone || current.phone,
+                    email: profile.email || current.email,
+                    identityNumber: profile.identityNumber || current.identityNumber,
                     city: profile.city || current.city,
                     district: profile.district || current.district,
                     neighborhood: profile.neighborhood || current.neighborhood,

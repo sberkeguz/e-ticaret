@@ -9,6 +9,7 @@ import com.sarikaya.e_ticaret.order.dto.OrderPageResponse;
 import com.sarikaya.e_ticaret.order.entity.OrderItem;
 import com.sarikaya.e_ticaret.order.entity.OrderStatus;
 import com.sarikaya.e_ticaret.order.repository.OrderRepository;
+import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.product.entity.Product;
 import com.sarikaya.e_ticaret.product.repository.ProductRepository;
 import com.sarikaya.e_ticaret.user.entity.User;
@@ -20,18 +21,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class OrderService {
     private final OrderRepository orders;
     private final ProductRepository products;
     private final UserRepository users;
+    private final PaymentRepository payments;
 
-    public OrderService(OrderRepository orders, ProductRepository products, UserRepository users) {
+    public OrderService(OrderRepository orders, ProductRepository products, UserRepository users,
+                        PaymentRepository payments) {
         this.orders = orders;
         this.products = products;
         this.users = users;
+        this.payments = payments;
     }
 
     @Transactional
@@ -92,12 +98,17 @@ public class OrderService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private OrderResponse toResponse(Order o) {
+        return toResponse(o, false);
+    }
+
+    private OrderResponse toResponse(Order o, boolean paymentProcessing) {
         return new OrderResponse(o.getId(), o.getUser().getUsername(), o.getFirstName(), o.getLastName(),
                 o.getPhone(), o.getCity(), o.getDistrict(), o.getNeighborhood(), o.getAddress(), o.getTotal(), o.getStatus(),
                 o.getCreatedAt(),
                 o.getItems().stream()
                         .map(i -> new OrderResponse.Item(i.getProductId(), i.getProductName(), i.getPrice(), i.getQuantity()))
-                        .toList());
+                        .toList(),
+                paymentProcessing);
     }
 
 
@@ -105,9 +116,11 @@ public class OrderService {
     public List<OrderResponse> findMine(String username) {
         List<Order> myOrders = orders.findAllByUserUsernameOrderByCreatedAtDesc(username);
 
+        Set<Long> processing = myOrders.isEmpty() ? Set.of()
+                : new HashSet<>(payments.findOrderIdsWithChargeInFlight(myOrders.stream().map(Order::getId).toList()));
         List<OrderResponse> responses = new ArrayList<>();
         for (Order order : myOrders) {
-            responses.add(toResponse(order));
+            responses.add(toResponse(order, processing.contains(order.getId())));
         }
         return responses;
     }

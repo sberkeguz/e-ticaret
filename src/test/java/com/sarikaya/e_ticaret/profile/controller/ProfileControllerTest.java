@@ -34,11 +34,13 @@ class ProfileControllerTest {
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var response = controller.updateProfile(user, new ProfileRequest(
-                " Ayşe ", " Yılmaz ", " 05551234567 ",
+                " Ayşe ", " Yılmaz ", " 05551234567 ", " ayse@example.com ", " 10000000146 ",
                 " İstanbul ", " Kadıköy ", " Caferağa ", " Adres 1 "));
 
         assertEquals("Ayşe", response.firstName());
         assertEquals("Yılmaz", response.lastName());
+        assertEquals("ayse@example.com", response.email());
+        assertEquals("10000000146", response.identityNumber());
         assertEquals("İstanbul", response.city());
         assertEquals("Adres 1", response.address());
         verify(userRepository).save(user);

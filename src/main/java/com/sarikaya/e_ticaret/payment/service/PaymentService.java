@@ -462,7 +462,7 @@ public class PaymentService {
     @Transactional
     public int expireReservations() {
         List<Payment> candidates = payments
-                .findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+                .findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(
                         PENDING, Instant.now().minus(Duration.ofMinutes(RESERVATION_MINUTES)));
         int expired = 0;
         for (Payment payment : candidates) {

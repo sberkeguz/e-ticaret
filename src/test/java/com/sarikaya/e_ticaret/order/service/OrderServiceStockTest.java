@@ -32,7 +32,7 @@ class OrderServiceStockTest {
                 "Istanbul", "Kadikoy", "Moda", "Adres", List.of(new OrderRequest.Item(4L, 1)));
 
         BadRequestException error = assertThrows(BadRequestException.class,
-                () -> new OrderService(orders, products, users).create("buyer", request));
+                () -> new OrderService(orders, products, users, mock(com.sarikaya.e_ticaret.payment.repository.PaymentRepository.class)).create("buyer", request));
         assertEquals("Armut için yeterli stok yok (kalan: 0).", error.getMessage());
         verifyNoInteractions(orders);
     }

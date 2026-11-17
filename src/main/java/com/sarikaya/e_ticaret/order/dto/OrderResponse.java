@@ -8,7 +8,9 @@ import java.util.List;
 
 public record OrderResponse(Long id, String username, String firstName, String lastName, String phone,
                             String city, String district, String neighborhood, String address, BigDecimal total,
-                            OrderStatus status, Instant createdAt, List<Item> items) {
+                            OrderStatus status, Instant createdAt, List<Item> items,
+                            /** Ödeme isteği gönderildi, sonucu bekleniyor: müşteri tekrar ödeyemez/iptal edemez. */
+                            boolean paymentProcessing) {
 
     public record Item(Long productId, String productName, BigDecimal price, int quantity) {}
 }

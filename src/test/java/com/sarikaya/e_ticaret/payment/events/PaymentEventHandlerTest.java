@@ -204,7 +204,34 @@ class PaymentEventHandlerTest {
         assertEquals(PaymentStatus.PENDING, payment.getStatus());
         assertEquals(com.sarikaya.e_ticaret.order.entity.OrderStatus.PAYMENT_PENDING, payment.getOrder().getStatus());
         assertEquals(7L, payment.getLastEventSequence());
+        assertEquals(clock.instant(), payment.getReservationStartedAt(), "müşteriye tekrar denemek için tam süre verilir");
         verifyNoInteractions(paymentService, extraPayments);
+    }
+
+    @Test
+    void lateFailureRestartsReservationSoCustomerCanRetry() {
+        Payment payment = payment(PaymentStatus.PENDING, ATTEMPT);
+        payment.setLastAttemptStatus("REQUESTED");
+        payment.setReservationStartedAt(Instant.parse("2026-11-12T09:50:00Z"));
+        allowProcessing();
+
+        handler().handle("m-1", event("FAILED", ATTEMPT));
+
+        assertEquals(clock.instant(), payment.getReservationStartedAt());
+        assertEquals(PaymentStatus.PENDING, payment.getStatus());
+    }
+
+    @Test
+    void failureAfterOrderExpiredDoesNotTouchReservation() {
+        Payment payment = payment(PaymentStatus.EXPIRED, ATTEMPT);
+        Instant started = Instant.parse("2026-11-12T09:50:00Z");
+        payment.setReservationStartedAt(started);
+        allowProcessing();
+
+        handler().handle("m-1", event("FAILED", ATTEMPT));
+
+        assertEquals(started, payment.getReservationStartedAt());
+        assertEquals(PaymentStatus.EXPIRED, payment.getStatus());
     }
 
     @Test

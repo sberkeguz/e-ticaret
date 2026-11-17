@@ -11,7 +11,10 @@ import { PAYMENT_REASON_KEY } from "./Checkout";
 const money = (value: number | string | null | undefined): string => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 const formatDate = (value: string): string => new Date(value).toLocaleString("tr-TR", { dateStyle: "medium", timeStyle: "short" });
 
-function Tracker({ status }: { status: OrderStatus }) {
+function Tracker({ status, processing }: { status: OrderStatus; processing: boolean }) {
+    if (status === PAYMENT_PENDING && processing) {
+        return <span className="badge badge-amber">Ödemeniz işleniyor</span>;
+    }
     if (OFF_TRACK.has(status)) {
         return <span className="badge badge-gray">{orderStatusLabel(status)}</span>;
     }
@@ -156,6 +159,18 @@ export default function MyOrders() {
         return () => { active = false; };
     }, []);
 
+    // Ödemesi işlenen sipariş varsa sonuç gelene kadar liste kendini yeniler (buton/etiket güncellenir).
+    const anyProcessing = orders.some((order) => order.paymentProcessing);
+    useEffect(() => {
+        if (!anyProcessing) return undefined;
+        const timer = window.setInterval(() => {
+            apiFetch("/api/orders")
+                .then(async (response) => { if (response.ok) setOrders(await response.json()); })
+                .catch(() => { /* bir sonraki turda tekrar denenir */ });
+        }, 5000);
+        return () => window.clearInterval(timer);
+    }, [anyProcessing]);
+
     return (
         <div className="storefront">
             <StoreHeader />
@@ -193,7 +208,7 @@ export default function MyOrders() {
                                         </button>
                                     </div>
                                 </div>
-                                <Tracker status={order.status} />
+                                <Tracker status={order.status} processing={order.paymentProcessing} />
                                 <div style={{ marginTop: 12 }}>
                                     {order.items.map((item) => (
                                         <div key={item.productId} className="order-line">
@@ -210,7 +225,7 @@ export default function MyOrders() {
                                         <OrderDetails orderId={order.id} />
                                     </div>
                                 )}
-                                {order.status === PAYMENT_PENDING && (
+                                {order.status === PAYMENT_PENDING && !order.paymentProcessing && (
                                     <div className="order-actions">
                                         <button className="button button-primary" type="button" disabled={cancellingId === order.id}
                                             onClick={() => navigate(`/checkout?order=${order.id}`)}>

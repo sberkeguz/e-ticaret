@@ -21,19 +21,27 @@
         timeout: 5s
         retries: 10
 
-    # Veritabanı yönetim paneli: http://localhost:5050 (yalnızca bu bilgisayardan)
+    # Veritabanı yönetim paneli: http://localhost:5050 (yalnızca bu bilgisayardan, giriş gerekmez)
+    # Masaüstü modu: tek kullanıcı, giriş ekranı yok. Port yalnız 127.0.0.1'e açık olduğu için güvenli.
     pgadmin:
       image: dpage/pgadmin4:9
       environment:
         PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
         PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_dev_password}
-        PGADMIN_CONFIG_SERVER_MODE: "True"
+        PGADMIN_CONFIG_SERVER_MODE: "False"
+        PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+        # Veritabanı bağlantısı her açılışta hazır gelir; şifre .env'den gelen pgpass ile verilir.
+        PGADMIN_REPLACE_SERVERS_ON_STARTUP: "True"
       ports:
         - "127.0.0.1:5050:80"
       volumes:
         - pgadmin_data:/var/lib/pgadmin
-        # Açılışta e-ticaret veritabanı bağlantısı hazır gelir (şifreyi ilk bağlanışta sorar).
         - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      configs:
+        - source: pgadmin_pgpass
+          target: /pgadmin4/pgpass
+          uid: "5050"
+          mode: 0600
       depends_on:
         postgres:
           condition: service_healthy
@@ -49,6 +57,13 @@
         - "127.0.0.1:15672:15672"
       volumes:
         - rabbitmq_data:/var/lib/rabbitmq
+      configs:
+        # http://localhost:15672/autologin.html → giriş yapılmış panel (başlatma kısayolu bunu açar).
+        # Yol eklenti sürümüne bağlı: RabbitMQ sürümü değişirse burayı güncelleyin.
+        - source: rabbitmq_autologin_page
+          target: /opt/rabbitmq/plugins/rabbitmq_management-4.4.0/priv/www/autologin.html
+        - source: rabbitmq_autologin_script
+          target: /opt/rabbitmq/plugins/rabbitmq_management-4.4.0/priv/www/js/autologin.js
       healthcheck:
         test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
         interval: 5s
@@ -161,6 +176,28 @@
         - ./docker/grafana/dashboards:/otel-lgtm/dashboards/e-ticaret:ro
         - ./docker/grafana/provisioning/e-ticaret-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/e-ticaret.yaml:ro
         - ./docker/grafana/provisioning/e-ticaret-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/e-ticaret.yaml:ro
+
+  configs:
+    # RabbitMQ paneline şifre girmeden giriş (yalnız yerel geliştirme; panel 127.0.0.1'e açık).
+    # Panelin kendi giriş isteğini yapar, sonucu panelin sakladığı yere yazar ve panele geçer.
+    # Panelin güvenlik politikası sayfa içi script'e izin vermez; script ayrı dosyada.
+    rabbitmq_autologin_page:
+      content: |
+        <!doctype html><meta charset="utf-8"><title>RabbitMQ giriş</title><p>Giriş yapılıyor…</p>
+        <script src="js/autologin.js"></script>
+    rabbitmq_autologin_script:
+      content: |
+        var body = new URLSearchParams({username: "${RABBITMQ_USER:-eticaret}", password: "${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}"});
+        fetch("api/login", {method: "POST", body: body}).then(function (r) { return r.json(); }).then(function (res) {
+          if (!res.token) throw new Error(res.reason || "giriş başarısız");
+          localStorage.removeItem("rabbitmq.session_expiry");
+          localStorage.setItem("rabbitmq.credentials", res.token.value);
+          localStorage.setItem("rabbitmq.auth-scheme", res.token.type === "bearer" ? "Bearer" : "Basic");
+          location.replace("./#/");
+        }).catch(function (e) { document.body.textContent = "RabbitMQ girişi başarısız: " + e.message; });
+    # pgAdmin'in veritabanına şifre sormadan bağlanması için (şifre .env'den; dosya diske yazılmaz)
+    pgadmin_pgpass:
+      content: "postgres:5432:*:eticaret_user:${POSTGRES_PASSWORD:-eticaret_dev_password}"
 
   volumes:
     postgres_data:

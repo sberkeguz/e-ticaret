@@ -108,6 +108,8 @@ export interface OrderResponse {
     status: OrderStatus;
     createdAt: IsoInstant;
     items: OrderItem[];
+    /** Ödeme isteği gönderildi, sonucu bekleniyor: tekrar ödeme/iptal düğmeleri gösterilmez. */
+    paymentProcessing: boolean;
 }
 
 export interface OrderPageResponse {
@@ -224,6 +226,8 @@ export interface ProfileResponse {
     firstName: string | null;
     lastName: string | null;
     phone: string | null;
+    email: string | null;
+    identityNumber: string | null;
     city: string | null;
     district: string | null;
     neighborhood: string | null;

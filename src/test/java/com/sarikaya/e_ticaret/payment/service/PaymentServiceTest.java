@@ -192,7 +192,7 @@ class PaymentServiceTest {
         // Sonuç olayı gecikti (ör. RabbitMQ kapalı): para çekilmiş olabilir. Sipariş düşürülmez,
         // ekran "işleniyor" der, iptal ve yeni istek engellenir; karar olay gelince verilir.
         Payment payment = queuedPayment(Instant.now().minus(Duration.ofHours(2)));
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(payment));
         when(payments.findByOrderIdForUpdate(42L)).thenReturn(Optional.of(payment));
 
@@ -210,7 +210,7 @@ class PaymentServiceTest {
         Payment payment = queuedPayment(Instant.now().minusSeconds(600));
         payment.setLastAttemptStatus("FAILED");
         Product product = product(2, "12.50");
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(payment));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
 
@@ -443,7 +443,7 @@ class PaymentServiceTest {
         Payment payment = pendingPayment();
         Order order = payment.getOrder();
         Product product = product(2, "12.50");
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(
                 eq(PaymentStatus.PENDING), any())).thenReturn(List.of(payment));
         when(products.findByIdForUpdate(4L)).thenReturn(Optional.of(product));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("FAILED"));
@@ -514,7 +514,7 @@ class PaymentServiceTest {
     @Test
     void expiryWaitsWhileChargeIsInFlightOrServiceIsUnreachable() {
         Payment inFlight = pendingPayment();
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(inFlight));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SENT"));
 
@@ -531,7 +531,7 @@ class PaymentServiceTest {
     void expiryWaitsWhileCustomerIsOnIyzicoFormOrBankPage() {
         // Müşteri formu dolduruyor/SMS onaylıyor: sipariş düşerse para yine de çekilebilirdi (geç ödeme).
         Payment payment = pendingPayment();
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(payment));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("AWAITING_3DS"));
 
@@ -543,7 +543,7 @@ class PaymentServiceTest {
     @Test
     void expiryCompletesOrderInsteadWhenMoneyWasTaken() {
         Payment payment = pendingPayment();
-        when(payments.findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(eq(PaymentStatus.PENDING), any()))
+        when(payments.findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(eq(PaymentStatus.PENDING), any()))
                 .thenReturn(List.of(payment));
         when(users.findByIdForUpdate(7L)).thenReturn(Optional.of(payment.getOrder().getUser()));
         when(iyzicoService.getAttempt(ATTEMPT)).thenReturn(result("SUCCEEDED"));

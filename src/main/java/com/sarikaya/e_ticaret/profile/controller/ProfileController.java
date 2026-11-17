@@ -41,6 +41,8 @@ public class ProfileController {
         user.setFirstName(normalize(request.firstName()));
         user.setLastName(normalize(request.lastName()));
         user.setPhone(normalize(request.phone()));
+        user.setEmail(normalize(request.email()));
+        user.setIdentityNumber(normalize(request.identityNumber()));
         user.setCity(normalize(request.city()));
         user.setDistrict(normalize(request.district()));
         user.setNeighborhood(normalize(request.neighborhood()));

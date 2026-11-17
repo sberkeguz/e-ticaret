@@ -31,6 +31,12 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByOrderIdForUpdate(@Param("orderId") Long orderId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    List<Payment> findTop100ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
-            PaymentStatus status, Instant createdAt);
+    List<Payment> findTop100ByStatusAndReservationStartedAtBeforeOrderByReservationStartedAtAsc(
+            PaymentStatus status, Instant reservationStartedAt);
+
+    /** Kuyrukla giden 2D isteği sonuç beklenen (ödemesi işlenen) siparişler. */
+    @Query("select p.order.id from Payment p where p.order.id in :orderIds "
+            + "and p.status = com.sarikaya.e_ticaret.payment.entity.PaymentStatus.PENDING "
+            + "and p.lastAttemptStatus = 'REQUESTED'")
+    List<Long> findOrderIdsWithChargeInFlight(@Param("orderIds") java.util.Collection<Long> orderIds);
 }
