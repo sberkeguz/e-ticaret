@@ -1,16 +1,9 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import UserHome from "./pages/UserHome";
 import ProtectedRoute from "./ProtectedRoute";
-import AdminPanel from "./pages/AdminPanel";
-import AdminBrand from "./pages/AdminBrand";
-import AdminUsers from "./pages/AdminUsers";
-import AdminOrders from "./pages/AdminOrders";
-import AdminCategory from "./pages/AdminCategory";
-import AdminProducts from "./pages/AdminProducts";
-import AdminProductForm from "./pages/AdminProductForm";
-import AdminLayout from "./components/AdminLayout";
 import ProductDetail from "./pages/ProductDetail";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
@@ -18,8 +11,19 @@ import Profile from "./pages/Profile";
 import MyOrders from "./pages/MyOrders";
 import Favorites from "./pages/Favorites";
 
+// Admin sayfaları ayrı dosyalarda: müşteri mağazayı açarken admin kodunu indirmez.
+const AdminPanel = lazy(() => import("./pages/AdminPanel"));
+const AdminBrand = lazy(() => import("./pages/AdminBrand"));
+const AdminUsers = lazy(() => import("./pages/AdminUsers"));
+const AdminOrders = lazy(() => import("./pages/AdminOrders"));
+const AdminCategory = lazy(() => import("./pages/AdminCategory"));
+const AdminProducts = lazy(() => import("./pages/AdminProducts"));
+const AdminProductForm = lazy(() => import("./pages/AdminProductForm"));
+const AdminLayout = lazy(() => import("./components/AdminLayout"));
+
 export default function App() {
     return (
+        <Suspense fallback={<p className="section-caption" style={{ padding: 24 }}>Yükleniyor…</p>}>
         <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
@@ -147,5 +151,6 @@ export default function App() {
 
             <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
+        </Suspense>
     );
 }

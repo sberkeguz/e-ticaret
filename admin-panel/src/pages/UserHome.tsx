@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../api";
 import { parentIdsOf } from "../categoryTree";
 import type { Brand, CategoryResponse, ProductPageResponse, ProductResponse } from "../types/api";
@@ -10,6 +10,32 @@ const getParentIds = (category: CategoryResponse): number[] => parentIdsOf(categ
 
 const PAGE_SIZE = 24;
 
+/**
+ * Ürün listesinin ilk sayfası sekme boyunca hatırlanır: ana sayfaya dönünce (ya da sayfa yenilenince)
+ * liste anında görünür, arka planda sunucudan tazelenir. Anahtar kullanıcıya göre ayrılır (admin'e
+ * özel ürünler başka hesaba gösterilmez). Fiyat/stok yine her açılışta sunucudan güncellenir.
+ */
+const CACHE_KEY = "product-list-cache";
+const CACHE_LIMIT = 10;
+const readCache = (): Record<string, ProductPageResponse> => {
+    try {
+        return JSON.parse(sessionStorage.getItem(CACHE_KEY) ?? "{}");
+    } catch {
+        return {};
+    }
+};
+const cachedPage = (key: string): ProductPageResponse | undefined => readCache()[key];
+const rememberPage = (key: string, page: ProductPageResponse) => {
+    try {
+        const cache = readCache();
+        delete cache[key];
+        const kept = Object.entries(cache).slice(-(CACHE_LIMIT - 1));
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries([...kept, [key, page]])));
+    } catch {
+        // Depolama kapalı/dolu: önbelleksiz devam edilir.
+    }
+};
+
 export default function UserHome() {
     const [categories, setCategories] = useState<CategoryResponse[]>([]);
     // Ürünler sunucudan sayfa sayfa gelir; filtreler sunucuda uygulanır.
@@ -19,7 +45,9 @@ export default function UserHome() {
     const [loadingMore, setLoadingMore] = useState(false);
     const [brands, setBrands] = useState<Brand[]>([]);
     const [error, setError] = useState("");
+    // Ürünlerin ilk cevabı gelene kadar true: bu sırada "ürün yok" ekranı gösterilmez.
     const [loading, setLoading] = useState(true);
+    const firstProductLoad = useRef(true);
     const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
     const [categoryPath, setCategoryPath] = useState<number[]>(() => ((window.history.state?.usr?.categoryPath ?? []) as unknown[]).map(Number));
@@ -45,8 +73,6 @@ export default function UserHome() {
                 setBrands([...brandData].sort((a, b) => a.name.localeCompare(b.name, "tr")));
             } catch (loadError) {
                 if (active) setError((loadError as Error).message || "Sunucuya ulaşılamadı.");
-            } finally {
-                if (active) setLoading(false);
             }
         };
         loadAll();
@@ -92,12 +118,24 @@ export default function UserHome() {
     }, [query]);
 
     // Filtre değişince ilk sayfa yeniden yüklenir (yazarken her tuşta değil, 300 ms sonra).
+    // Sayfa ilk açıldığında beklenmez: ürünler kategorilerle aynı anda istenir.
     useEffect(() => {
         let active = true;
+        const cacheKey = `${localStorage.getItem("username") ?? ""}|${query}`;
+        const cached = cachedPage(cacheKey);
+        if (cached) {
+            setProducts(cached.items);
+            setTotalItems(cached.totalItems);
+            setNextPage(1);
+            setLoading(false);
+        }
+        const delay = firstProductLoad.current ? 0 : 300;
         const timer = setTimeout(() => {
+            firstProductLoad.current = false;
             loadPage(0)
                 .then((data) => {
                     if (!active) return;
+                    rememberPage(cacheKey, data);
                     setProducts(data.items);
                     setTotalItems(data.totalItems);
                     setNextPage(1);
@@ -105,9 +143,9 @@ export default function UserHome() {
                 })
                 .catch((loadError) => { if (active) setError((loadError as Error).message); })
                 .finally(() => { if (active) setLoading(false); });
-        }, 300);
+        }, delay);
         return () => { active = false; clearTimeout(timer); };
-    }, [loadPage]);
+    }, [loadPage, query]);
 
     const loadMore = async () => {
         setLoadingMore(true);
