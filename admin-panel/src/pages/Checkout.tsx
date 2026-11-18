@@ -8,6 +8,7 @@ import type {
 } from "../types/api";
 import StoreHeader from "../components/StoreHeader";
 import useLiveCart from "../useLiveCart";
+import usePaymentAvailability from "../usePaymentAvailability";
 import { CartNotice } from "./Cart";
 
 const money = (value: number | string | null | undefined): string => Number(value || 0).toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
@@ -377,6 +378,9 @@ export default function Checkout() {
     }, [processingOrderId, navigate]);
 
     const locked = saving || Boolean(threeDSHtml) || Boolean(processingOrderId);
+    // RabbitMQ kapalıyken 3D Secure'suz ödeme alınmaz; 3D Secure doğrudan çalıştığı için o seçilebilir.
+    const twoDAvailable = usePaymentAvailability(!threeDSHtml && !processingOrderId);
+    const twoDBlocked = !twoDAvailable && !forceThreeDS;
 
     if (!payOrderId && items.length === 0) {
         return (
@@ -545,8 +549,14 @@ export default function Checkout() {
                             3D Secure: {forceThreeDS ? "Açık" : "Kapalı"}
                         </button>
                         <p className="section-caption">Açıkken bankanızın doğrulama ekranı bu sayfada açılır.</p>
+                        {!twoDAvailable && (
+                            <p className="notice-banner" role="status" data-testid="payment-unavailable">
+                                Ödeme sistemimizde geçici bir sorun var: 3D Secure olmadan şu an ödeme alınamıyor.
+                                3D Secure'u açarak ödeyebilir ya da birkaç dakika sonra tekrar deneyebilirsiniz.
+                            </p>
+                        )}
                         {error && <p className="error-banner" role="alert">{error}</p>}
-                        <button className="button button-primary" type="submit" disabled={locked || stockLoading || Boolean(stockError) || unavailable.length > 0}>
+                        <button className="button button-primary" type="submit" disabled={locked || twoDBlocked || stockLoading || Boolean(stockError) || unavailable.length > 0}>
                             {saving ? "Ödeme alınıyor..." : processingOrderId ? "Ödemeniz işleniyor…" : threeDSHtml ? "Banka doğrulaması bekleniyor" : `${money(total)} öde`}
                         </button>
                     </aside>
