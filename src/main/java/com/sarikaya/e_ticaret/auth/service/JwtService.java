@@ -2,16 +2,14 @@ package com.sarikaya.e_ticaret.auth.service;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
-import java.security.Key;
+import javax.crypto.SecretKey;
 import java.util.Date;
-import java.util.HashMap;
 
 @Service
 public class JwtService {
@@ -27,16 +25,15 @@ public class JwtService {
     // Token üretir
     public String generateToken(UserDetails userDetails) {
         return Jwts.builder()
-                .setClaims(new HashMap<>())                      // ek bilgi (şimdilik boş)
-                .setSubject(userDetails.getUsername())           // token'ın sahibi
-                .setIssuedAt(new Date(System.currentTimeMillis())) // üretilme zamanı
-                .setExpiration(new Date(System.currentTimeMillis() + accessTokenMinutes * 60_000)) // varsayılan 15 dk
-                .signWith(getSignInKey(), SignatureAlgorithm.HS256) // HS256 ile imzala
+                .subject(userDetails.getUsername())           // token'ın sahibi
+                .issuedAt(new Date(System.currentTimeMillis())) // üretilme zamanı
+                .expiration(new Date(System.currentTimeMillis() + accessTokenMinutes * 60_000)) // varsayılan 15 dk
+                .signWith(getSignInKey(), Jwts.SIG.HS256)     // HS256 ile imzala
                 .compact();
     }
 
     // Gizli anahtardan imza anahtarı üretir
-    private Key getSignInKey() {
+    private SecretKey getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }
@@ -44,11 +41,11 @@ public class JwtService {
     // Token'ın içindeki bilgileri okur.
     // İmza yanlışsa veya süre dolduysa hata fırlatır (JwtAuthFilter bunu yakalıyor).
     private Claims extractAllClaims(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(getSignInKey())
+        return Jwts.parser()
+                .verifyWith(getSignInKey())
                 .build()
-                .parseClaimsJws(token)
-                .getBody();
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     // Token'daki kullanıcı adını verir
