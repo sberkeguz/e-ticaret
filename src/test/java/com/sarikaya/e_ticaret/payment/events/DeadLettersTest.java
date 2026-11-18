@@ -29,13 +29,30 @@ class DeadLettersTest {
         var listed = deadLetters.list().stream().filter(m -> m.messageId().startsWith("test-dlq-")).toList();
         assertTrue(listed.stream().anyMatch(m -> m.messageId().equals(replayId) && m.orderId() == 999_123L
                 && "işlenemedi".equals(m.error()) && m.retries() == 3));
-        assertTrue(deadLetters.count() >= 2); // sayı RabbitMQ'da gecikmeli güncellenebilir; kesin kontrol aşağıda
+        // list() mesajları geri kuyruğa koyar; RabbitMQ bunu asenkron işler, sayı bir süre eksik görünebilir.
+        assertTrue(eventually(() -> deadLetters.count() >= 2));
 
         assertTrue(deadLetters.discard(discardId));
         assertTrue(deadLetters.replay(replayId));
 
         assertFalse(deadLetters.list().stream().anyMatch(m -> m.messageId().equals(replayId) || m.messageId().equals(discardId)));
         assertFalse(deadLetters.discard("olmayan-mesaj"));
+    }
+
+    private static boolean eventually(java.util.function.BooleanSupplier condition) {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return condition.getAsBoolean();
     }
 
     private void putInDeadLetters(String messageId) {
