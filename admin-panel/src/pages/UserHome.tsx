@@ -124,10 +124,15 @@ export default function UserHome() {
         const cacheKey = `${localStorage.getItem("username") ?? ""}|${query}`;
         const cached = cachedPage(cacheKey);
         if (cached) {
-            setProducts(cached.items);
-            setTotalItems(cached.totalItems);
-            setNextPage(1);
-            setLoading(false);
+            // Hatırlanan liste hemen gösterilir. Mikro görevde: ekran çizilmeden önce çalışır, ama efektin
+            // içinde art arda render tetiklenmez (react-hooks/set-state-in-effect).
+            queueMicrotask(() => {
+                if (!active) return;
+                setProducts(cached.items);
+                setTotalItems(cached.totalItems);
+                setNextPage(1);
+                setLoading(false);
+            });
         }
         const delay = firstProductLoad.current ? 0 : 300;
         const timer = setTimeout(() => {
