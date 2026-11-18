@@ -1,9 +1,9 @@
 package com.sarikaya.e_ticaret;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
+import com.sarikaya.e_ticaret.IntegrationTest;
 
-@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
+@IntegrationTest
 class ETicaretApplicationTests {
 
 	@Test

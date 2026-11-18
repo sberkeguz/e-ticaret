@@ -15,7 +15,7 @@ import com.sarikaya.e_ticaret.user.entity.User;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import com.sarikaya.e_ticaret.IntegrationTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
@@ -33,7 +33,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
 /** iyzico-service'e senkron giden (3D) ödeme yolundaki kullanıcı kilidini sınar. */
-@SpringBootTest(properties = {"spring.rabbitmq.listener.simple.auto-startup=false"})
+@IntegrationTest
 class PaymentConcurrencyTest {
     private static final String KEY = "6f1c2a8e-3b4d-4c5e-9f00-112233445566";
     @Autowired private PaymentService service;

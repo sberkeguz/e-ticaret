@@ -5,7 +5,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import com.sarikaya.e_ticaret.IntegrationTest;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Gerçek RabbitMQ'da: DLQ mesajı listelenir, tekrar işlenir veya silinir; diğerleri kaybolmaz. */
-@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
+@IntegrationTest
 class DeadLettersTest {
     @Autowired private DeadLetters deadLetters;
     @Autowired private RabbitTemplate rabbit;

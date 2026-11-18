@@ -11,7 +11,7 @@ import com.sarikaya.e_ticaret.product.repository.ProductRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import com.sarikaya.e_ticaret.IntegrationTest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Mağaza araması gerçek veritabanında: filtreler sorguda uygulanır, sonuç sayfalanır.
  * Test kendi ürünlerini oluşturur ve sonda geri alır (@Transactional).
  */
-@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
+@IntegrationTest
 @Transactional
 class ProductSearchTest {
     @Autowired private ProductService service;

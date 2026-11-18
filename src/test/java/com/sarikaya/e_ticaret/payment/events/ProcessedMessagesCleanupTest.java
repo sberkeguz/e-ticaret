@@ -2,7 +2,7 @@ package com.sarikaya.e_ticaret.payment.events;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
+import com.sarikaya.e_ticaret.IntegrationTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.UUID;
@@ -10,7 +10,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Gerçek veritabanında: 14 günden eski kayıt silinir, yeni kayıt kalır. */
-@SpringBootTest(properties = "spring.rabbitmq.listener.simple.auto-startup=false")
+@IntegrationTest
 class ProcessedMessagesCleanupTest {
     @Autowired private ProcessedMessagesCleanup cleanup;
     @Autowired private JdbcTemplate jdbc;
