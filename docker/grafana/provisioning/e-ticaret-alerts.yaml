@@ -152,3 +152,61 @@ groups:
               type: threshold
               expression: B
               conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      - uid: eticaret-rabbitmq-kapali
+        title: RabbitMQ'ya ulaşılamıyor (2D ödeme alınamıyor)
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Backend 1 dakikadır RabbitMQ'ya bağlanamıyor. 2D ödemeler alınamıyor; mağazada uyarı bandı görünüyor.
+          description: "docker compose ps rabbitmq ile durumuna bakın, gerekirse docker compose start rabbitmq. Bekleyen istekler outbox'ta durur; 50 sn'den eski olanlar RabbitMQ dönünce reddedilir, müşteri tekrar dener."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: min(payment_broker_up{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: lt, params: [ 1 ] } } ]
+
+      - uid: eticaret-outbox-bekliyor
+        title: Ödeme isteği outbox'ta bekliyor
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Backend outbox'ında 30 saniyeden eski, RabbitMQ'ya gönderilmemiş mesaj var.
+          description: "RabbitMQ kapalı veya yavaş olabilir. Ayrıntı: pgAdmin > outbox_messages (published_at boş satırlar, last_error sütunu)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(payment_outbox_pending_age_seconds{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 30 ] } } ]

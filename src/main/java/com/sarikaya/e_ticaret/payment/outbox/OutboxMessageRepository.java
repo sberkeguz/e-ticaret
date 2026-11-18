@@ -24,6 +24,10 @@ public interface OutboxMessageRepository extends JpaRepository<OutboxMessage, UU
     @Query("select m from OutboxMessage m where m.publishedAt is null order by m.createdAt")
     List<OutboxMessage> lockUnpublished(Pageable page);
 
+    /** En eski gönderilmemiş mesajın yazıldığı an; hepsi gönderildiyse null. */
+    @Query("select min(m.createdAt) from OutboxMessage m where m.publishedAt is null")
+    Instant oldestUnpublishedAt();
+
     @Modifying
     @Query("delete from OutboxMessage m where m.publishedAt < :before")
     int deletePublishedBefore(@Param("before") Instant before);

@@ -5,6 +5,7 @@ import com.sarikaya.e_ticaret.payment.dto.CheckoutRequest;
 import com.sarikaya.e_ticaret.payment.dto.CheckoutResponse;
 import com.sarikaya.e_ticaret.payment.dto.PayOrderRequest;
 import com.sarikaya.e_ticaret.payment.dto.PaymentStatusResponse;
+import com.sarikaya.e_ticaret.payment.events.PaymentBroker;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import com.sarikaya.e_ticaret.payment.service.PaymentStatusLongPoll;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,6 +22,7 @@ import org.springframework.web.context.request.async.DeferredResult;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.Set;
 
 @RestController
@@ -31,15 +33,27 @@ public class PaymentController {
 
     private final PaymentService paymentService;
     private final PaymentStatusLongPoll statusLongPoll;
+    private final PaymentBroker broker;
     private final String frontendUrl;
 
     public PaymentController(
             PaymentService paymentService,
             PaymentStatusLongPoll statusLongPoll,
+            PaymentBroker broker,
             @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.paymentService = paymentService;
         this.statusLongPoll = statusLongPoll;
+        this.broker = broker;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
+    }
+
+    /** Mağaza ödeme ekranında "ödemeler geçici olarak alınamıyor" bandını göstermek için. */
+    @GetMapping("/availability")
+    public PaymentAvailability availability() {
+        return new PaymentAvailability(broker.isUp(), broker.downSince());
+    }
+
+    public record PaymentAvailability(boolean available, Instant unavailableSince) {
     }
 
     @PostMapping("/checkout")
