@@ -2,7 +2,9 @@
 # Masaüstündeki "E-ticaret Başlat" kısayolu bu dosyayı çalıştırır. Tekrar çalıştırmak güvenlidir:
 # zaten çalışan şeylere dokunmaz.
 
-$ErrorActionPreference = "Stop"
+# "Stop" kullanılmaz: Windows PowerShell 5.1'de docker'ın hata çıktısına yazdığı her satır (Docker kapalıyken
+# "failed to connect", compose'un ilerleme satırları) betiği durdururdu. Başarı her adımda $LASTEXITCODE ile denetlenir.
+$ErrorActionPreference = "Continue"
 $Project = $PSScriptRoot
 $DockerExe = Join-Path $env:LOCALAPPDATA "Programs\DockerDesktop\Docker Desktop.exe"
 $NgrokUrl = "https://rescuer-premises-program.ngrok-free.dev"
@@ -17,7 +19,7 @@ function Fail($text) {
 }
 
 function DockerReady {
-    docker info --format "{{.ServerVersion}}" *> $null
+    docker info --format "{{.ServerVersion}}" 2>&1 | Out-Null
     return $LASTEXITCODE -eq 0
 }
 
@@ -27,6 +29,14 @@ if (DockerReady) {
     Ok "Zaten çalışıyor."
 } else {
     if (-not (Test-Path $DockerExe)) { Fail "Docker Desktop bulunamadı: $DockerExe" }
+    # Docker düzgün kapanmazsa (bilgisayar kapatıldı vb.) eski "engine.sock" kalır; Windows bu dosyayı
+    # silmeye/taşımaya izin vermediği için Docker açılırken çöker. Docker kapalıyken klasörü kenara alırız,
+    # Docker açılınca yenisini oluşturur.
+    $secrets = Join-Path $env:LOCALAPPDATA "docker-secrets-engine"
+    if (-not (Get-Process "Docker Desktop" -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $secrets "engine.sock"))) {
+        Rename-Item -LiteralPath $secrets -NewName ("docker-secrets-engine.eski-" + (Get-Date -Format "yyyyMMdd-HHmmss")) -ErrorAction SilentlyContinue
+        Write-Host "    Docker'dan kalan eski bağlantı dosyası kenara alındı."
+    }
     Start-Process $DockerExe
     Write-Host "    Başlatıldı, hazır olması bekleniyor (1-2 dk sürebilir)..."
     $deadline = (Get-Date).AddMinutes(4)
