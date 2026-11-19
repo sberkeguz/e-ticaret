@@ -1,6 +1,7 @@
 package com.sarikaya.e_ticaret.auth.service;
 
 import com.sarikaya.e_ticaret.exception.TooManyLoginAttemptsException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -19,6 +20,7 @@ public class LoginAttemptService {
     private final Map<String, FailedAttempts> attemptsByUsername = new ConcurrentHashMap<>();
     private final Clock clock;
 
+    @Autowired
     public LoginAttemptService() {
         this(Clock.systemUTC());
     }

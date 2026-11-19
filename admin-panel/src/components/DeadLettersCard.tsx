@@ -20,7 +20,7 @@ export default function DeadLettersCard() {
                 if (active) { setData(body); setError(""); }
             })
             .catch((loadError) => { if (active) setError(loadError.message || "İşlenemeyen mesajlar yüklenemedi."); });
-        load();
+        void load();
         const timer = setInterval(load, 30_000);
         return () => { active = false; clearInterval(timer); };
     }, [reloadKey]);

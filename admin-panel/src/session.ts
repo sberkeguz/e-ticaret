@@ -5,8 +5,17 @@
 
 import type { AuthResponse } from "./types/api";
 
-const CSRF_HEADER = { "X-Requested-With": "fetch" };
 const RETRY_AFTER_MS = 400;
+
+/**
+ * Çerezle çalışan uçlar (yenileme, çıkış) CSRF token'ı ister: girişte sunucunun koyduğu XSRF-TOKEN
+ * çerezindeki değer başlıkta geri gönderilir. Başka bir site bu çerezi okuyamadığı için başlığı koyamaz.
+ */
+function csrfHeaders(): Record<string, string> {
+    const cookie = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("XSRF-TOKEN="));
+    const token = cookie?.slice("XSRF-TOKEN=".length);
+    return token ? { "X-XSRF-TOKEN": decodeURIComponent(token) } : {};
+}
 
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
@@ -31,7 +40,7 @@ export function tokenFrom(response: Response): string | null {
 }
 
 async function tryRefresh(): Promise<boolean> {
-    const response = await fetch("/api/auth/refresh", { method: "POST", headers: CSRF_HEADER });
+    const response = await fetch("/api/auth/refresh", { method: "POST", headers: csrfHeaders() });
     if (!response.ok) return false;
     accessToken = tokenFrom(response);
     const body: Partial<AuthResponse> | null = await response.json().catch(() => null);
@@ -66,6 +75,6 @@ export function refreshSession(): Promise<boolean> {
 export async function logoutSession(): Promise<void> {
     accessToken = null;
     try {
-        await fetch("/api/auth/logout", { method: "POST", headers: CSRF_HEADER });
+        await fetch("/api/auth/logout", { method: "POST", headers: csrfHeaders() });
     } catch { /* bağlantı yoksa da yerel oturum kapanır */ }
 }

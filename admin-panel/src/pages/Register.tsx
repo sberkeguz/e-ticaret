@@ -24,7 +24,7 @@ export default function Register() {
                 setError(body?.message || "Kayıt başarısız.");
                 return;
             }
-            navigate("/login");
+            void navigate("/login");
         } catch {
             setError("Sunucuya ulaşılamadı.");
         } finally {

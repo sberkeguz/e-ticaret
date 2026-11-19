@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CategoryIndex } from "../categoryTree";
 import type { CategoryResponse } from "../types/api";
 
@@ -11,9 +11,12 @@ interface CategoryParentSelectProps {
     /** Seçilemeyecek kategoriler (kendisi ve alt kategorileri: döngü olmasın). */
     excludedIds?: Set<number>;
     placeholder?: string;
+    /** Ekran okuyucunun okuyacağı alan adı. */
+    ariaLabel?: string;
 }
 
-export default function CategoryParentSelect({ index, categories, value, onChange, excludedIds = new Set<number>(), placeholder = "Üst kategori ara…" }: CategoryParentSelectProps) {
+export default function CategoryParentSelect({ index, categories, value, onChange, excludedIds = new Set<number>(), placeholder = "Üst kategori ara…", ariaLabel = "Üst kategoriler" }: CategoryParentSelectProps) {
+    const inputId = useId();
     const [query, setQuery] = useState("");
     const [open, setOpen] = useState(false);
     const [highlight, setHighlight] = useState(0);
@@ -53,7 +56,8 @@ export default function CategoryParentSelect({ index, categories, value, onChang
 
     return (
         <div className={`parent-select${open ? " open" : ""}`} ref={boxRef}>
-            <div className="parent-select-box" onClick={() => { setOpen(true); inputRef.current?.focus(); }}>
+            {/* Kutunun boş bir yerine tıklamak giriş alanına odaklanır ve listeyi açar (label → input). */}
+            <label className="parent-select-box" htmlFor={inputId}>
                 {value.map((id) => (
                     <span className="category-chip" key={id} title={index.pathOf(id).join(" › ")}>
                         {index.byId.get(id)?.name ?? `#${id}`}
@@ -65,14 +69,17 @@ export default function CategoryParentSelect({ index, categories, value, onChang
                     className="parent-select-input"
                     value={query}
                     placeholder={value.length ? "" : placeholder}
+                    id={inputId}
+                    aria-label={ariaLabel}
                     onFocus={() => setOpen(true)}
+                    onClick={() => setOpen(true)}
                     onChange={(event) => { setQuery(event.target.value); setOpen(true); setHighlight(0); }}
                     onKeyDown={onKeyDown}
                     role="combobox"
                     aria-expanded={open}
                     aria-autocomplete="list"
                 />
-            </div>
+            </label>
             {open && (
                 <ul className="parent-select-menu" role="listbox">
                     {options.length ? options.map((option, position) => (

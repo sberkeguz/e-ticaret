@@ -24,7 +24,7 @@ export default function usePaymentAvailability(enabled = true): boolean {
                 /* geçici ağ hatası: bilinen durum kalır */
             }
         };
-        refresh();
+        void refresh();
         const timer = setInterval(refresh, REFRESH_MS);
         return () => { active = false; clearInterval(timer); };
     }, [enabled]);

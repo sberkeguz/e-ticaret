@@ -1,8 +1,10 @@
 package com.sarikaya.e_ticaret.brand.controller;
 
+import com.sarikaya.e_ticaret.brand.dto.BrandRequest;
 import com.sarikaya.e_ticaret.brand.entity.Brand;
 import com.sarikaya.e_ticaret.exception.ResourceNotFoundException;
 import com.sarikaya.e_ticaret.brand.repository.BrandRepository;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +26,9 @@ public class AdminBrandController {
     }
 //ekle
     @PostMapping
-    public ResponseEntity<Brand> createBrand(@RequestBody Brand brand) {
+    public ResponseEntity<Brand> createBrand(@Valid @RequestBody BrandRequest request) {
+        Brand brand = new Brand();
+        brand.setName(request.name().strip());
         Brand savedBrand = brandRepository.save(brand);
         return ResponseEntity.ok(savedBrand);
     }
@@ -41,11 +45,11 @@ public class AdminBrandController {
 
  //güncelleme
  @PutMapping("/{id}")
- public ResponseEntity<Brand> updateBrand(@PathVariable Long id, @RequestBody Brand brandDetails) {
+ public ResponseEntity<Brand> updateBrand(@PathVariable Long id, @Valid @RequestBody BrandRequest request) {
      Brand brand = brandRepository.findById(id)
              .orElseThrow(() -> new ResourceNotFoundException("Marka bulunamadı (id: " + id + ")"));
 
-     brand.setName(brandDetails.getName());
+     brand.setName(request.name().strip());
      return ResponseEntity.ok(brandRepository.save(brand));
  }
 }

@@ -58,3 +58,4 @@ admin-panel/dist/
 
 # SonarQube tarayıcısının geçici klasörü
 .scannerwork/
+.sonar/

@@ -319,7 +319,15 @@ function plainNumber(value: unknown): string {
   if (!text.includes(".")) {
     return text;
   }
-  return text.replace(/0+$/, "").replace(/\.$/, "");
+  // Ondalık kısmın sonundaki sıfırlar ve kalan nokta atılır ("10.50" → "10.5", "10.0" → "10").
+  let end = text.length;
+  while (text[end - 1] === "0") {
+    end--;
+  }
+  if (text[end - 1] === ".") {
+    end--;
+  }
+  return text.slice(0, end);
 }
 
 function decodeHtml(content: unknown): string | null {

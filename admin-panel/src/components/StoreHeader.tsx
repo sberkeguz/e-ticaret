@@ -48,7 +48,7 @@ export default function StoreHeader({ search, syncCartOnMount = true }: StoreHea
     const logout = async () => {
         await logoutSession();
         clearSessionStorage();
-        navigate("/login");
+        void navigate("/login");
     };
 
     return (

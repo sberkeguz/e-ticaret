@@ -28,7 +28,7 @@ export default function PaymentAlertsCard() {
                 if (active) { setAlerts(data); setError(""); }
             })
             .catch((loadError) => { if (active) setError(loadError.message || "Ödeme uyarıları yüklenemedi."); });
-        load();
+        void load();
         const timer = setInterval(load, 30_000);
         return () => { active = false; clearInterval(timer); };
     }, []);

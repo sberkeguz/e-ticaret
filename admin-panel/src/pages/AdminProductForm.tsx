@@ -77,7 +77,7 @@ export default function AdminProductForm() {
                 if (active) setLoading(false);
             }
         };
-        load();
+        void load();
         return () => { active = false; };
     }, [id, isEditing]);
 
@@ -107,7 +107,7 @@ export default function AdminProductForm() {
                 body: JSON.stringify(payload),
             });
             if (!response.ok) throw new Error(await readError(response, "Ürün kaydedilemedi."));
-            navigate("/admin/products");
+            void navigate("/admin/products");
         } catch (saveError) {
             setError((saveError as Error).message || "Sunucuya ulaşılamadı.");
         } finally {
@@ -161,10 +161,8 @@ export default function AdminProductForm() {
                     </label>
                     <label className="field span-2 test-product-toggle">
                         <input type="checkbox" checked={form.testProduct} onChange={(event) => updateField("testProduct", event.target.checked)} />
-                        <span>
-                            <span className="field-label">Test ürünü</span>
-                            <span className="section-caption">Açıksa ürünü sadece yöneticiler görür; müşteriler mağazada göremez ve sepete ekleyemez.</span>
-                        </span>
+                        <span className="field-label">Test ürünü</span>
+                        <span className="section-caption">Açıksa ürünü sadece yöneticiler görür; müşteriler mağazada göremez ve sepete ekleyemez.</span>
                     </label>
 
                     <div className="field span-2">

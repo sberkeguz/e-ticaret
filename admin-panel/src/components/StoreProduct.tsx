@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { addToCart } from "../cart";
 import AddToCart from "./AddToCart";
 import FavoriteButton from "./FavoriteButton";
@@ -15,8 +15,12 @@ export default function StoreProduct({ product, scrollOnOpen = false }: StorePro
     const navigate = useNavigate();
     const quantity = Number(product.stock ?? 0);
     return (
-        <article className="surface store-product" onClick={() => {
-            navigate(`/product/${product.id}`);
+        // Kartın tamamı fareyle tıklanınca ürüne gider (kolaylık); klavye ve ekran okuyucu için asıl yol
+        // ürün adındaki bağlantıdır. Bağlantıya ve alttaki eylem alanına (sepet, hemen al) yapılan
+        // tıklamalar kartın tıklaması sayılmaz.
+        <article className="surface store-product" onClick={(event) => {
+            if ((event.target as Element).closest("a, .store-product-actions")) return;
+            void navigate(`/product/${product.id}`);
             if (scrollOnOpen) window.scrollTo(0, 0);
         }} style={{ cursor: "pointer" }}>
             <FavoriteButton product={product} />
@@ -25,7 +29,7 @@ export default function StoreProduct({ product, scrollOnOpen = false }: StorePro
             </div>
             <div className="store-product-content">
                 <div className="store-product-title">
-                    <h3 className="store-product-name">{product.name}{product.testProduct && <span className="badge badge-amber test-badge" title="Bu ürünü sadece yöneticiler görür">Test</span>}</h3>
+                    <h3 className="store-product-name"><Link to={`/product/${product.id}`} onClick={() => { if (scrollOnOpen) window.scrollTo(0, 0); }}>{product.name}</Link>{product.testProduct && <span className="badge badge-amber test-badge" title="Bu ürünü sadece yöneticiler görür">Test</span>}</h3>
                     {product.brandName && <div className="store-product-brand">{product.brandName}</div>}
                 </div>
                 <div className="store-product-bottom">
@@ -40,7 +44,7 @@ export default function StoreProduct({ product, scrollOnOpen = false }: StorePro
                 </div>
                 <AddToCart product={product} className="button button-quiet button-small" />
                 <button className="button button-primary button-small" disabled={quantity <= 0}
-                    onClick={(event) => { event.stopPropagation(); if (addToCart(product)) navigate("/checkout"); }}>Hemen al</button>
+                    onClick={(event) => { event.stopPropagation(); if (addToCart(product)) void navigate("/checkout"); }}>Hemen al</button>
             </div>
         </article>
     );

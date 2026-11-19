@@ -46,7 +46,7 @@ export default function AdminPanel() {
             }));
             if (mounted) setStats(Object.fromEntries(values));
         };
-        loadCounts();
+        void loadCounts();
         return () => { mounted = false; };
     }, []);
 

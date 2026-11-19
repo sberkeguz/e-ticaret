@@ -75,7 +75,7 @@ export default function UserHome() {
                 if (active) setError((loadError as Error).message || "Sunucuya ulaşılamadı.");
             }
         };
-        loadAll();
+        void loadAll();
         return () => { active = false; };
     }, []);
 

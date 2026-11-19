@@ -32,7 +32,7 @@ import java.util.Optional;
  */
 @Service
 public class RefreshTokenService {
-    public static final String COOKIE = "refresh_token";
+    public static final String COOKIE_NAME = "refresh_token";
     /** Çerez yalnızca oturum uçlarına gider; diğer isteklerle taşınmaz. */
     static final String COOKIE_PATH = "/api/auth";
     private static final Logger log = LoggerFactory.getLogger(RefreshTokenService.class);
@@ -134,7 +134,7 @@ public class RefreshTokenService {
     }
 
     private ResponseCookie.ResponseCookieBuilder baseCookie(String value) {
-        return ResponseCookie.from(COOKIE, value)
+        return ResponseCookie.from(COOKIE_NAME, value)
                 .httpOnly(true)
                 .secure(secureCookie)
                 .sameSite("Strict")

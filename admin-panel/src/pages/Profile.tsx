@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { ProfileResponse } from "../types/api";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
+import Modal from "../components/Modal";
 import StoreHeader from "../components/StoreHeader";
 import { moveFavorites } from "../favorites";
 import { setAccessToken, tokenFrom } from "../session";
@@ -95,7 +96,7 @@ export default function Profile() {
                 if (active) setAddressError("Kaydedilmiş adres listesi yüklenemedi.");
             }
         };
-        loadSavedAddress();
+        void loadSavedAddress();
         return () => { active = false; };
     }, [profile.city, profile.district, provinces]);
 
@@ -260,21 +261,19 @@ export default function Profile() {
                 </form>
             )}
             {usernameDialog && (
-                <div style={styles.backdrop} onMouseDown={(event) => {
-                    if (event.target === event.currentTarget && !usernameSaving) setUsernameDialog(false);
-                }}>
-                    <form role="dialog" aria-modal="true" aria-labelledby="username-title" onSubmit={changeUsername} style={styles.dialog}>
+                <Modal onClose={() => setUsernameDialog(false)} closable={!usernameSaving} labelledBy="username-title">
+                    <form onSubmit={changeUsername} style={styles.dialog}>
                         <h2 id="username-title">Kullanıcı adını değiştir</h2>
                         <p style={styles.muted}>Güvenliğiniz için mevcut şifrenizi girin.</p>
                         {usernameError && <p role="alert" style={styles.error}>{usernameError}</p>}
-                        <label style={styles.field}>Yeni kullanıcı adı<input style={styles.input} autoComplete="username" autoFocus required maxLength={60} value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} /></label>
+                        <label style={styles.field}>Yeni kullanıcı adı<input style={styles.input} autoComplete="username" data-autofocus required maxLength={60} value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} /></label>
                         <label style={styles.field}>Mevcut şifre<input style={styles.input} type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
                         <div style={styles.dialogActions}>
                             <button type="button" disabled={usernameSaving} onClick={() => setUsernameDialog(false)} style={styles.secondaryButton}>Vazgeç</button>
                             <button type="submit" disabled={usernameSaving} style={styles.primaryButton}>{usernameSaving ? "Doğrulanıyor..." : "Onayla ve değiştir"}</button>
                         </div>
                     </form>
-                </div>
+                </Modal>
             )}
         </div>
     );
@@ -294,7 +293,6 @@ const styles: Record<string, CSSProperties> = {
     secondaryButton: { padding: "10px 14px", border: "1px solid #bbb", borderRadius: 6, background: "#fff", cursor: "pointer", whiteSpace: "nowrap" },
     success: { padding: 12, color: "#176b37", background: "#e9f7ee", borderRadius: 6 },
     error: { padding: 12, color: "#9b1c1c", background: "#fdecec", borderRadius: 6 },
-    backdrop: { position: "fixed", zIndex: 1000, inset: 0, display: "grid", placeItems: "center", padding: 16, background: "#0008" },
-    dialog: { display: "grid", gap: 14, width: "min(440px, 100%)", padding: 24, boxSizing: "border-box", background: "#fff", borderRadius: 12, boxShadow: "0 15px 50px #0004" },
+    dialog: { display: "grid", gap: 14, width: "min(440px, calc(100vw - 36px))", padding: 24, boxSizing: "border-box", background: "#fff", borderRadius: 12, boxShadow: "0 15px 50px #0004" },
     dialogActions: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 },
 };

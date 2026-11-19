@@ -44,7 +44,7 @@ public class PaymentController {
         this.paymentService = paymentService;
         this.statusLongPoll = statusLongPoll;
         this.broker = broker;
-        this.frontendUrl = frontendUrl.replaceAll("/+$", "");
+        this.frontendUrl = withoutTrailingSlashes(frontendUrl);
     }
 
     /** Mağaza ödeme ekranında "ödemeler geçici olarak alınamıyor" bandını göstermek için. */
@@ -164,5 +164,13 @@ public class PaymentController {
         URI uri = URI.create(frontendUrl);
         String port = uri.getPort() == -1 ? "" : ":" + uri.getPort();
         return uri.getScheme() + "://" + uri.getHost() + port;
+    }
+
+    private static String withoutTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
+        }
+        return url.substring(0, end);
     }
 }

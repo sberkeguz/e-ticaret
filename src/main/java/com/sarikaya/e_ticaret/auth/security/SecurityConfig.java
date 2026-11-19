@@ -1,8 +1,12 @@
 package com.sarikaya.e_ticaret.auth.security;
 
 import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import com.sarikaya.e_ticaret.auth.service.RefreshTokenService;
 import com.sarikaya.e_ticaret.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -17,6 +21,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.header.writers.frameoptions.XFrameOptionsHeaderWriter;
 import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -24,7 +30,10 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
@@ -34,6 +43,17 @@ public class SecurityConfig {
     private final UserRepository userRepository;
     // Her istekte token'ı kontrol eden filtremiz
     private final JwtAuthFilter jwtAuthFilter;
+
+    @Value("${auth.refresh-token-days:14}")
+    private long refreshTokenDays;
+
+    @Value("${auth.refresh-cookie-secure:true}")
+    private boolean secureCookies;
+
+    /** Yenileme çereziyle kimlik doğrulayan uçlar: CSRF denetimi yalnızca bunlarda yapılır. */
+    private static final Set<String> COOKIE_AUTHENTICATED_PATHS = Set.of("/api/auth/refresh", "/api/auth/logout");
+    /** 3D Secure ve Ödeme Formu dönüşleri: banka/iyzico sayfasından gelen form gönderimi. */
+    private static final Set<String> PAYMENT_RETURN_PATHS = Set.of("/api/payments/callback", "/api/payments/form-callback");
 
     // Login sırasında kullanıcıyı veritabanından bulan servis
     @Bean
@@ -47,8 +67,14 @@ public class SecurityConfig {
         http
                 // CORS ayarlarını aşağıdaki corsConfigurationSource bean'inden okur
                 .cors(Customizer.withDefaults())
-                // Token (JWT) kullandığımız ve session tutmadığımız için CSRF kapalı
-                .csrf(csrf -> csrf.disable())
+                // CSRF yalnızca tarayıcının kendiliğinden gönderdiği kimlik bilgisiyle (yenileme çerezi)
+                // çalışan isteklerde anlamlıdır; diğer uçlar Authorization başlığıyla doğrulanır ve başka
+                // bir site bu başlığı koyamaz. Çerezle gelen istek, XSRF-TOKEN çerezindeki değeri
+                // X-XSRF-TOKEN başlığında geri göndermek zorunda (başka site bu çerezi okuyamaz).
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(csrfTokenRepository())
+                        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                        .requireCsrfProtectionMatcher(SecurityConfig::sentWithRefreshCookie))
                 // 3D Secure dönüş sayfası, ödeme ekranındaki iframe içinde açılır; yalnızca ona
                 // çerçeve izni veriyoruz, diğer tüm yanıtlar X-Frame-Options: DENY ile kalır.
                 .headers(headers -> headers
@@ -80,6 +106,28 @@ public class SecurityConfig {
         return http.build();
     }
 
+    private CookieCsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository repository = new CookieCsrfTokenRepository();
+        // Ön yüz değeri okuyup başlığa koyabilsin diye HttpOnly değil; SameSite=Strict ile başka siteye gitmez.
+        // Yenileme çereziyle aynı ömürde: tarayıcı kapanıp açılınca da oturum yenilenebilsin.
+        repository.setCookieCustomizer(cookie -> cookie
+                .httpOnly(false)
+                .secure(secureCookies)
+                .sameSite("Strict")
+                .path("/")
+                .maxAge(Duration.ofDays(refreshTokenDays)));
+        return repository;
+    }
+
+    private static boolean sentWithRefreshCookie(HttpServletRequest request) {
+        if (!"POST".equals(request.getMethod()) || !COOKIE_AUTHENTICATED_PATHS.contains(request.getRequestURI())) {
+            return false;
+        }
+        Cookie[] cookies = request.getCookies();
+        return cookies != null && Arrays.stream(cookies)
+                .anyMatch(cookie -> RefreshTokenService.COOKIE_NAME.equals(cookie.getName()));
+    }
+
     private static RequestMatcher notPaymentCallback() {
         return request -> !"/api/payments/callback".equals(request.getRequestURI());
     }
@@ -97,19 +145,14 @@ public class SecurityConfig {
         // Bunu yazmazsak React res.headers.get("Authorization") ile token'ı okuyamaz.
         configuration.setExposedHeaders(List.of("Authorization"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        CorsConfiguration paymentCallbackConfiguration = new CorsConfiguration();
-        // 3D Secure dönüşü bankanın/iyzico'nun sayfasından gelen bir form POST'udur; kaynağı
-        // bankaya göre değişir. Uç nokta kimlik bilgisi kullanmaz, sonucu iyzico'dan imzalı
-        // olarak doğrular; bu yüzden her kaynağa açık.
-        paymentCallbackConfiguration.setAllowedOriginPatterns(List.of("*"));
-        paymentCallbackConfiguration.setAllowCredentials(false);
-        paymentCallbackConfiguration.setAllowedMethods(List.of("POST"));
-        paymentCallbackConfiguration.setAllowedHeaders(List.of("*"));
-        source.registerCorsConfiguration("/api/payments/callback", paymentCallbackConfiguration);
-        // iyzico Ödeme Formu dönüşü de aynı türden: token ile doğrulanır, sonuç iyzico'ya sorulur.
-        source.registerCorsConfiguration("/api/payments/form-callback", paymentCallbackConfiguration);
         source.registerCorsConfiguration("/**", configuration);
-        return source;
+        // 3D Secure / Ödeme Formu dönüşü, bankanın veya iyzico'nun sayfasından tarayıcının yaptığı bir
+        // form gönderimidir (sayfa geçişi); CORS'a tabi değildir. Bu uçlar için CORS kuralı hiç
+        // uygulanmaz: yabancı Origin başlığı yüzünden reddedilmezler, ama başka bir sitenin JavaScript'ine
+        // de izin (Access-Control-Allow-Origin) verilmez. Sonuç iyzico'dan imzalı olarak doğrulanır.
+        return request -> PAYMENT_RETURN_PATHS.contains(request.getRequestURI())
+                ? null
+                : source.getCorsConfiguration(request);
     }
 
     @Bean

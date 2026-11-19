@@ -27,7 +27,7 @@ export default function AddToCart({ product, className = "button button-quiet" }
 
     if (quantity > 0) {
         return (
-            <div className="qty-stepper" onClick={(event) => event.stopPropagation()}>
+            <div className="qty-stepper">
                 <button type="button" onClick={stop(() => (quantity <= 1 ? removeFromCart(product.id) : setQuantity(product.id, quantity - 1)))}>−</button>
                 <span>{quantity}</span>
                 <button type="button" disabled={quantity >= stock} onClick={stop(() => addToCart(product))}>+</button>

@@ -1,6 +1,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import type { CategoryResponse } from "../types/api";
 import { buildCategoryIndex } from "../categoryTree";
+import Modal from "./Modal";
 
 interface CategoryPickerProps {
     categories: CategoryResponse[];
@@ -78,11 +79,11 @@ export default function CategoryPicker({ categories, selectedIds, onChange, onCl
         .sort((a, b) => index.pathOf(a.id).join(" › ").localeCompare(index.pathOf(b.id).join(" › "), "tr"));
 
     return (
-        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-            <div className="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-label="Kategori seç">
+        <Modal onClose={onClose} labelledBy="category-picker-title">
+            <div className="modal-card modal-card-wide">
                 <div className="modal-head">
                     <div>
-                        <h2>Kategori seç</h2>
+                        <h2 id="category-picker-title">Kategori seç</h2>
                         <p>Ürünün görüneceği kategorileri işaretleyin. Aramada eşleşen kategoriler üst kategorileriyle birlikte gösterilir.</p>
                     </div>
                     <button type="button" className="button button-quiet button-small" onClick={onClose} aria-label="Kapat">✕</button>
@@ -91,7 +92,7 @@ export default function CategoryPicker({ categories, selectedIds, onChange, onCl
                     <div className="picker-tools">
                         <div className="search-field" style={{ flex: 1 }}>
                             <span className="search-glyph">⌕</span>
-                            <input className="input" placeholder="Kategori ara…" value={search} onChange={(event) => setSearch(event.target.value)} autoFocus />
+                            <input className="input" placeholder="Kategori ara…" value={search} onChange={(event) => setSearch(event.target.value)} data-autofocus />
                         </div>
                         <label className="picker-switch" title="Bir alt kategori seçildiğinde üst kategorileri de otomatik seçilir">
                             <input type="checkbox" checked={withParents} onChange={(event) => setWithParents(event.target.checked)} />
@@ -127,6 +128,6 @@ export default function CategoryPicker({ categories, selectedIds, onChange, onCl
                     <button type="button" className="button button-primary" onClick={() => { onChange([...draft].map(String)); onClose(); }}>Seçimi uygula</button>
                 </div>
             </div>
-        </div>
+        </Modal>
     );
 }

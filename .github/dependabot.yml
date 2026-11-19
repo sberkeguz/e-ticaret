@@ -7,6 +7,9 @@ updates:
     schedule: { interval: weekly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # Spring Boot'un OpenTelemetry API sürümüne bağlı (pom.xml'deki nota bakın); elle yükseltilir.
+      - dependency-name: io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0
 
   # TypeScript'in büyük sürümleri (7+) typescript-eslint desteklemeden kurulamıyor; elle yükseltilir.
   - package-ecosystem: npm

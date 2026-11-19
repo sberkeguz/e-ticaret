@@ -22,6 +22,14 @@ const loadList = (path: string): Promise<Place[]> => fetch(`${ADDRESS_API}/${pat
     .then((response) => response.json())
     .then((body: { data?: Place[] }) => (body.data ?? []).map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "tr")));
 const digits = (value: string): string => value.replace(/\D/g, "");
+/** ad@alan.uzantı biçimi: boşluksuz, tek @, alan adında baştan ve sondan uzak bir nokta. */
+const looksLikeEmail = (value: string): boolean => {
+    const at = value.indexOf("@");
+    if (at <= 0 || at !== value.lastIndexOf("@") || /\s/.test(value)) return false;
+    const domain = value.slice(at + 1);
+    const dot = domain.lastIndexOf(".");
+    return dot > 0 && dot < domain.length - 1;
+};
 
 const blankCard: CheckoutCard = { holderName: "", number: "", expireMonth: "", expireYear: "", cvc: "" };
 const currentYear = new Date().getFullYear();
@@ -178,7 +186,7 @@ export default function Checkout() {
                 if (active) setAddressLoadFailed(true);
             }
         };
-        loadSavedAddress();
+        void loadSavedAddress();
         return () => { active = false; };
     }, [profileAddress, provinces]);
 
@@ -230,9 +238,10 @@ export default function Checkout() {
         if (unavailable.length) return setError("Sepetinizde yeterli stoğu olmayan ürünler var. Sipariş vermek için sepetinizi düzenleyin.");
         if (!payOrderId) {
             if (!form.firstName.trim() || !form.lastName.trim()) return setError("Ad ve soyad zorunlu.");
-            if (!/^(\+90|0)?\s?\(?5\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}$/.test(form.phone.trim())) return setError("Geçerli bir telefon numarası girin (05xx xxx xx xx).");
+            // Boşluk, tire ve parantezler atılınca geriye 05xxxxxxxxx, 5xxxxxxxxx veya +905xxxxxxxxx kalmalı.
+            if (!/^(?:\+90|0)?5\d{9}$/.test(form.phone.replace(/[\s()-]/g, ""))) return setError("Geçerli bir telefon numarası girin (05xx xxx xx xx).");
         }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return setError("Geçerli bir e-posta adresi girin.");
+        if (!looksLikeEmail(form.email.trim())) return setError("Geçerli bir e-posta adresi girin.");
         if (!/^\d{11}$/.test(form.identityNumber)) return setError("T.C. kimlik numarası 11 haneli olmalı.");
         if (!payOrderId && (!form.city || !form.district || !form.neighborhood || !form.address.trim())) return setError("İl, ilçe, mahalle ve açık adres zorunlu.");
         const invalidCard = cardError();
@@ -290,7 +299,7 @@ export default function Checkout() {
                 return;
             }
             const outcome = result && PAYMENT_RESULTS.includes(result.result) ? result.result : "pending";
-            navigate(`/orders?payment=${outcome}`, { replace: true });
+            void navigate(`/orders?payment=${outcome}`, { replace: true });
         } catch (saveError) {
             setSaving(false);
             setError((saveError as Error).message || "Ödeme alınamadı.");
@@ -310,7 +319,7 @@ export default function Checkout() {
                 return;
             }
             if (data?.type !== "iyzico-payment-result" || !PAYMENT_RESULTS.includes(data.result)) return;
-            navigate(`/orders?payment=${encodeURIComponent(data.result)}`, { replace: true });
+            void navigate(`/orders?payment=${encodeURIComponent(data.result)}`, { replace: true });
         };
         window.addEventListener("message", onMessage);
         return () => window.removeEventListener("message", onMessage);
@@ -324,7 +333,7 @@ export default function Checkout() {
             if (location.origin !== window.location.origin || location.pathname !== "/orders") return;
             const result = new URLSearchParams(location.search).get("payment");
             if (result && PAYMENT_RESULTS.includes(result)) {
-                navigate(`/orders?payment=${encodeURIComponent(result)}`, { replace: true });
+                void navigate(`/orders?payment=${encodeURIComponent(result)}`, { replace: true });
             }
         } catch (loadError) {
             if ((loadError as Error).name !== "SecurityError") throw loadError;
@@ -359,7 +368,7 @@ export default function Checkout() {
                         if (status.message) sessionStorage.setItem(PAYMENT_REASON_KEY, status.message);
                         else sessionStorage.removeItem(PAYMENT_REASON_KEY);
                     } catch { /* gizli sekme vb.: sebepsiz devam */ }
-                    navigate(`/orders?payment=${status.result}`, { replace: true });
+                    void navigate(`/orders?payment=${status.result}`, { replace: true });
                     return;
                 }
             } catch {
@@ -368,12 +377,12 @@ export default function Checkout() {
             }
             if (!active) return;
             if (Date.now() >= giveUpAt) {
-                navigate("/orders?payment=pending", { replace: true });
+                void navigate("/orders?payment=pending", { replace: true });
                 return;
             }
             timer = setTimeout(check, retryAfter);
         };
-        check();
+        void check();
         return () => { active = false; controller.abort(); clearTimeout(timer); };
     }, [processingOrderId, navigate]);
 

@@ -31,7 +31,7 @@ export default function Login() {
             setAccessToken(token);
             localStorage.setItem("role", data.role);
             localStorage.setItem("username", data.username);
-            navigate(data.role === "ADMIN" ? "/admin" : "/home");
+            void navigate(data.role === "ADMIN" ? "/admin" : "/home");
         } catch {
             setError("Sunucuya ulaşılamadı.");
         } finally {

@@ -60,10 +60,13 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-opentelemetry</artifactId>
 		</dependency>
+		<!-- Sürüm, Spring Boot'un getirdiği OpenTelemetry API sürümüne uymalı (2.28.x → API 1.62).
+		     Daha yenisi daha yeni API ister; uyuşmazsa loglar Grafana'ya gitmez (NoClassDefFoundError).
+		     Spring Boot OpenTelemetry sürümünü yükseltince bu da birlikte yükseltilir. -->
 		<dependency>
 			<groupId>io.opentelemetry.instrumentation</groupId>
 			<artifactId>opentelemetry-logback-appender-1.0</artifactId>
-			<version>2.33.1-alpha</version>
+			<version>2.28.0-alpha</version>
 		</dependency>
 
 		<dependency>

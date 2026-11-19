@@ -20,7 +20,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const logout = async () => {
         await logoutSession();
         clearSessionStorage();
-        navigate("/login");
+        void navigate("/login");
     };
 
     return (

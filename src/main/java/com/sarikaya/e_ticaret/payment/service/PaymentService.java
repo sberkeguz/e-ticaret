@@ -334,8 +334,8 @@ public class PaymentService {
         payment.setFailureReason(null);
         payment.setChargeDeadline(deadline);
         payments.save(payment);
-        outbox.enqueue(PaymentEventTopology.EXCHANGE, PaymentEventTopology.CHARGE_ROUTING_KEY, ChargeRequested.TYPE,
-                new ChargeRequested(ChargeRequested.TYPE, 1, attemptId, idempotencyKey, deadline, request));
+        outbox.enqueue(PaymentEventTopology.EXCHANGE, PaymentEventTopology.CHARGE_ROUTING_KEY, ChargeRequested.MESSAGE_TYPE,
+                new ChargeRequested(ChargeRequested.MESSAGE_TYPE, 1, attemptId, idempotencyKey, deadline, request));
         log.info("Sipariş {} için 2D ödeme isteği kuyruğa yazıldı (deneme {})", order.getId(), attemptId);
         return CheckoutResponse.processing(order.getId());
     }
@@ -343,7 +343,7 @@ public class PaymentService {
     /** iyzico-service'e giden 2D ödeme komutu. request, servisin POST /payments gövdesiyle aynıdır. */
     record ChargeRequested(String type, int version, UUID attemptId, String idempotencyKey, Instant deadline,
                            StartPayment request) {
-        static final String TYPE = "ChargeRequested";
+        static final String MESSAGE_TYPE = "ChargeRequested";
     }
 
     /**

@@ -12,9 +12,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * RabbitMQ'ya ulaşılabiliyor mu? 2D ödeme yalnızca RabbitMQ ile gider; RabbitMQ kapalıyken ödeme isteği
@@ -59,7 +61,10 @@ public class PaymentBroker {
         boolean up;
         try {
             up = running.get(CHECK_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (Exception slowOrFailed) {
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); // uygulama kapanıyor: bayrak korunur, durum "ulaşılamıyor" sayılır
+            up = false;
+        } catch (ExecutionException | TimeoutException slowOrFailed) {
             up = false; // asılı kalan deneme arka planda bitince bir sonraki kontrol yenisini başlatır
         }
         record(up);

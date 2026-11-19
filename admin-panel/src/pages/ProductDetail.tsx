@@ -89,7 +89,7 @@ export default function ProductDetail() {
                                     <i>›</i>
                                     <a href="/home" onClick={(event) => {
                                         event.preventDefault();
-                                        navigate("/home", { state: { categoryPath: trail.slice(0, index + 1).map((item) => item.id) } });
+                                        void navigate("/home", { state: { categoryPath: trail.slice(0, index + 1).map((item) => item.id) } });
                                     }}>{crumb.name}</a>
                                 </span>
                             ))}
@@ -112,7 +112,7 @@ export default function ProductDetail() {
                             </div>
                             <div className="product-actions">
                                 <AddToCart product={product} />
-                                <button className="button button-primary" disabled={stock <= 0} onClick={() => { if (addToCart(product)) navigate("/checkout"); }}>
+                                <button className="button button-primary" disabled={stock <= 0} onClick={() => { if (addToCart(product)) void navigate("/checkout"); }}>
                                     Hemen al
                                 </button>
                             </div>

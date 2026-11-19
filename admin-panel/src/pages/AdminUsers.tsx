@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { LoginHistoryDto, Role, UserDto } from "../types/api";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import Modal from "../components/Modal";
 
 const ROLES = ["USER", "ADMIN"];
 const formatDate = (value: string | null | undefined): string => value
@@ -241,16 +242,16 @@ export default function AdminUsers() {
             </section>
 
             {modalMode && selectedUser && (
-                <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalMode(null); }}>
+                <Modal onClose={() => setModalMode(null)} closable={!saving} labelledBy={modalMode === "edit" ? "edit-user-title" : "history-title"}>
                     {modalMode === "edit" ? (
                         <form className="modal-card" onSubmit={saveUser}>
                             <div className="modal-head">
-                                <div><h2>Kullanıcıyı düzenle</h2><p>{selectedUser.username} hesabının bilgilerini güncelleyin.</p></div>
+                                <div><h2 id="edit-user-title">Kullanıcıyı düzenle</h2><p>{selectedUser.username} hesabının bilgilerini güncelleyin.</p></div>
                                 <button className="button button-quiet button-icon" type="button" aria-label="Kapat" onClick={() => setModalMode(null)}>×</button>
                             </div>
                             <div className="modal-body" style={{ display: "grid", gap: 15 }}>
                                 {error && <p className="error-banner" role="alert">{error}</p>}
-                                <label className="field"><span className="field-label">Kullanıcı adı</span><input className="input" autoFocus disabled={selectedUser.username === currentUsername} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} /></label>
+                                <label className="field"><span className="field-label">Kullanıcı adı</span><input className="input" data-autofocus disabled={selectedUser.username === currentUsername} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} /></label>
                                 <label className="field"><span className="field-label">Rol</span><select className="select" disabled={selectedUser.username === currentUsername} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value as Role }))}>{ROLES.map((role) => <option key={role} value={role}>{role === "ADMIN" ? "Yönetici" : "Kullanıcı"}</option>)}</select></label>
                                 <label className="field"><span className="field-label">Yeni şifre</span><input className="input" type="password" minLength={8} value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Boş bırakılırsa değişmez" /></label>
                             </div>
@@ -278,7 +279,7 @@ export default function AdminUsers() {
                             <div className="modal-actions"><button className="button button-quiet" type="button" onClick={() => setModalMode(null)}>Kapat</button></div>
                         </section>
                     )}
-                </div>
+                </Modal>
             )}
         </>
     );

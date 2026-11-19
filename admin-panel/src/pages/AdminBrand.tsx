@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Brand } from "../types/api";
 import { apiFetch } from "../api";
 
@@ -14,6 +14,12 @@ export default function AdminBrand() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
+    const editInputRef = useRef<HTMLInputElement>(null);
+
+    // "Düzenle"ye basılınca odak, satırda açılan ad kutusuna geçer (klavyeyle hemen yazılabilsin).
+    useEffect(() => {
+        if (editingId !== null) editInputRef.current?.focus();
+    }, [editingId]);
     const [editName, setEditName] = useState("");
     const [search, setSearch] = useState("");
 
@@ -140,7 +146,7 @@ export default function AdminBrand() {
                                         <tr key={brand.id}>
                                             <td>
                                                 {editingId === brand.id ? (
-                                                    <input className="input" autoFocus value={editName} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveBrand(brand.id); if (event.key === "Escape") setEditingId(null); }} />
+                                                    <input className="input" ref={editInputRef} aria-label="Marka adı" value={editName} onChange={(event) => setEditName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveBrand(brand.id); if (event.key === "Escape") setEditingId(null); }} />
                                                 ) : <span className="cell-primary">{brand.name}</span>}
                                             </td>
                                             <td><span className="cell-sub">#{brand.id}</span></td>
@@ -148,7 +154,7 @@ export default function AdminBrand() {
                                                 <div className="button-row" style={{ justifyContent: "flex-end" }}>
                                                     {editingId === brand.id ? (
                                                         <>
-                                                            <button className="button button-primary button-small" onClick={() => saveBrand(brand.id)}>Kaydet</button>
+                                                            <button className="button button-primary button-small" onClick={() => void saveBrand(brand.id)}>Kaydet</button>
                                                             <button className="button button-quiet button-small" onClick={() => setEditingId(null)}>Vazgeç</button>
                                                         </>
                                                     ) : (
