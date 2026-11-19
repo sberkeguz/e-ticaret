@@ -55,3 +55,6 @@ Thumbs.db
 # Build output
 .mvn/wrapper/maven-wrapper.jar
 admin-panel/dist/
+
+# SonarQube tarayıcısının geçici klasörü
+.scannerwork/

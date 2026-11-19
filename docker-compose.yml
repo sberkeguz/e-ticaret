@@ -177,6 +177,79 @@
         - ./docker/grafana/provisioning/e-ticaret-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/e-ticaret.yaml:ro
         - ./docker/grafana/provisioning/e-ticaret-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/e-ticaret.yaml:ro
 
+    # Kod kalitesi: SonarQube Community Build (ücretsiz). http://localhost:9000 (kullanıcı: admin).
+    # Yaklaşık 2 GB bellek ister; bu yüzden normal "up" ile açılmaz. Tarama: .\sonar.ps1
+    # (sunucuyu açar, ilk kurulumu yapar, backend + arayüz + iyzico-service'i tarar).
+    sonarqube:
+      image: sonarqube:community
+      profiles: [ sonar ]
+      environment:
+        SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+        SONAR_JDBC_USERNAME: sonar
+        SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-sonar_dev_password}
+        # Docker Desktop'ta vm.max_map_count ayarı gerekmesin (gömülü Elasticsearch mmap kullanmaz).
+        SONAR_SEARCH_JAVAADDITIONALOPTS: -Dnode.store.allow_mmap=false
+      ports:
+        - "127.0.0.1:9000:9000"
+      volumes:
+        - sonarqube_data:/opt/sonarqube/data
+        - sonarqube_extensions:/opt/sonarqube/extensions
+      depends_on:
+        sonar-db:
+          condition: service_healthy
+
+    # SonarQube'un kendi veritabanı: uygulamanın veritabanından ayrı tutulur.
+    sonar-db:
+      image: postgres:17-alpine
+      profiles: [ sonar ]
+      environment:
+        POSTGRES_DB: sonar
+        POSTGRES_USER: sonar
+        POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-sonar_dev_password}
+      volumes:
+        - sonar_db_data:/var/lib/postgresql/data
+      healthcheck:
+        test: [ "CMD-SHELL", "pg_isready -U sonar -d sonar" ]
+        interval: 5s
+        timeout: 5s
+        retries: 10
+
+    # Tarayıcılar: yalnızca sonar.ps1 çalıştırır ("docker compose run"), iş bitince kapanır.
+    # Backend derlenmiş sınıflarla taranır (Java kuralları bunları ister); testler çalıştırılmaz.
+    sonar-scan-backend:
+      image: maven:3.9-eclipse-temurin-21
+      profiles: [ sonar-scan ]
+      working_dir: /src
+      environment:
+        SONAR_TOKEN: ${SONAR_TOKEN:-}
+      command: >
+        mvn -B -q -DskipTests compile org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
+        -Dsonar.host.url=http://sonarqube:9000
+        -Dsonar.projectKey=e-ticaret-backend -Dsonar.projectName=e-ticaret-backend
+      volumes:
+        - .:/src
+        - sonar_maven_cache:/root/.m2
+
+    sonar-scan-frontend:
+      image: sonarsource/sonar-scanner-cli
+      profiles: [ sonar-scan ]
+      environment:
+        SONAR_HOST_URL: http://sonarqube:9000
+        SONAR_TOKEN: ${SONAR_TOKEN:-}
+      volumes:
+        - ./admin-panel:/usr/src
+        - sonar_scanner_cache:/opt/sonar-scanner/.sonar/cache
+
+    sonar-scan-iyzico:
+      image: sonarsource/sonar-scanner-cli
+      profiles: [ sonar-scan ]
+      environment:
+        SONAR_HOST_URL: http://sonarqube:9000
+        SONAR_TOKEN: ${SONAR_TOKEN:-}
+      volumes:
+        - ./services/iyzico-service:/usr/src
+        - sonar_scanner_cache:/opt/sonar-scanner/.sonar/cache
+
   configs:
     # RabbitMQ paneline şifre girmeden giriş (yalnız yerel geliştirme; panel 127.0.0.1'e açık).
     # Panelin kendi giriş isteğini yapar, sonucu panelin sakladığı yere yazar ve panele geçer.
@@ -204,3 +277,8 @@
     rabbitmq_data:
     pgadmin_data:
     lgtm_data:
+    sonarqube_data:
+    sonarqube_extensions:
+    sonar_db_data:
+    sonar_maven_cache:
+    sonar_scanner_cache:
