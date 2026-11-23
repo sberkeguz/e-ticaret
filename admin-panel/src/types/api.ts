@@ -110,10 +110,55 @@ export interface OrderResponse {
     items: OrderItem[];
     /** Ödeme isteği gönderildi, sonucu bekleniyor: tekrar ödeme/iptal düğmeleri gösterilmez. */
     paymentProcessing: boolean;
+    /**
+     * Müşteriye gösterilen kargo bilgisi (GET /api/orders). Gönderi yoksa, kargo kaydı henüz
+     * oluşmadıysa ya da oluşamadıysa null. Eski backend alanı hiç göndermeyebilir.
+     */
+    shipment?: CustomerShipment | null;
+}
+
+/**
+ * Yöneticinin gördüğü gönderi durumu. Kargo servisindeki SENDING burada REQUESTED,
+ * REJECTED burada FAILED olarak gelir.
+ */
+export type ShipmentStatus = "REQUESTED" | "CREATED" | "IN_TRANSIT" | "DELIVERED" | "DELIVERY_FAILED" | "FAILED";
+
+export interface AdminShipment {
+    status: ShipmentStatus;
+    carrierName: string | null;
+    /** CREATED ve sonrasında dolu. */
+    trackingNumber: string | null;
+    /** Yalnız https adresi. */
+    trackingUrl: string | null;
+    statusAt: IsoInstant;
+    /** Kaçıncı kargo isteği (1'den başlar); tekrar denemede geri gönderilir, ekranda gösterilmez. */
+    requestNo: number;
+    /** Yalnız FAILED'da dolu; Türkçe, en çok 200 karakter. */
+    failureReason: string | null;
+    /** Yalnız FAILED'da true olabilir. */
+    canRetry: boolean;
+}
+
+export type CustomerShipmentStatus = "CREATED" | "IN_TRANSIT" | "DELIVERED" | "DELIVERY_FAILED";
+
+export interface CustomerShipment {
+    status: CustomerShipmentStatus;
+    carrierName: string | null;
+    trackingNumber: string;
+    /** Yalnız https adresi. */
+    trackingUrl: string | null;
+    statusAt: IsoInstant;
+}
+
+/** Yönetici sipariş cevabı: sipariş + kargo alanları (eski backend kargo alanlarını göndermeyebilir). */
+export interface AdminOrderResponse extends Omit<OrderResponse, "shipment"> {
+    /** Backend hesaplar: hazırlanıyor + ödeme alınmış + gönderi yok. */
+    canShip?: boolean;
+    shipment?: AdminShipment | null;
 }
 
 export interface OrderPageResponse {
-    items: OrderResponse[];
+    items: AdminOrderResponse[];
     page: number;
     size: number;
     totalItems: number;

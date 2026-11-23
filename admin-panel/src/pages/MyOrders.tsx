@@ -3,6 +3,7 @@ import type { OrderDetailResponse, OrderResponse, OrderStatus } from "../types/a
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import StoreHeader from "../components/StoreHeader";
+import CustomerShipmentInfo from "../components/CustomerShipmentInfo";
 import { clearRemoved } from "../cart";
 
 import { CANCELLED, ORDER_STEPS, OFF_TRACK, PAYMENT_PENDING, orderStatusLabel, paymentStatusLabel } from "../orderStatus";
@@ -209,6 +210,7 @@ export default function MyOrders() {
                                     </div>
                                 </div>
                                 <Tracker status={order.status} processing={order.paymentProcessing} />
+                                <CustomerShipmentInfo shipment={order.shipment} />
                                 <div style={{ marginTop: 12 }}>
                                     {order.items.map((item) => (
                                         <div key={item.productId} className="order-line">

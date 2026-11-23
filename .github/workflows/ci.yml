@@ -75,6 +75,8 @@ jobs:
           cache: npm
           cache-dependency-path: admin-panel/package-lock.json
       - run: npm ci
+      - name: Bağımlılık taraması (çalışma zamanı paketleri, high ve üstü)
+        run: npm audit --omit=dev --audit-level=high
       - name: Lint
         run: npm run lint
       - name: Tür denetimi
@@ -87,6 +89,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Arayüz testleri (Playwright, sahte backend)
         run: npm run test:e2e
+      - name: Docker imajı (nginx, compose'daki frontend servisiyle aynı Dockerfile)
+        run: docker build -t e-ticaret-frontend:ci .
       - name: Playwright raporu
         if: failure()
         uses: actions/upload-artifact@v7

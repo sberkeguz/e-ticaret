@@ -1,5 +1,5 @@
 // API sipariş ve ödeme durumlarını sabit kodlarla gönderir; ekranda görünen Türkçe yazı burada seçilir.
-import type { OrderStatus, PaymentStatus } from "./types/api";
+import type { CustomerShipmentStatus, OrderStatus, PaymentStatus, ShipmentStatus } from "./types/api";
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
     PAYMENT_PENDING: "Ödeme bekliyor",
@@ -30,3 +30,20 @@ export const OFF_TRACK = new Set<OrderStatus>([CANCELLED, PAYMENT_PENDING, "PAYM
 
 export const orderStatusLabel = (status: OrderStatus | string): string => ORDER_STATUS_LABELS[status as OrderStatus] ?? status;
 export const paymentStatusLabel = (status: PaymentStatus | null): string => (status ? PAYMENT_STATUS_LABELS[status] ?? status : "Ödeme kaydı yok");
+
+/** Gönderi durumlarının ekranda görünen adı (yönetici ve müşteri aynı adı görür). */
+export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
+    REQUESTED: "Kargo hazırlanıyor",
+    CREATED: "Kargoya verildi",
+    IN_TRANSIT: "Yolda",
+    DELIVERED: "Teslim edildi",
+    DELIVERY_FAILED: "Teslim edilemedi",
+    FAILED: "Kargo oluşturulamadı",
+};
+
+/** Müşteriye durum adı yerine gösterilen açıklama (olmayan durumda durum adı gösterilir). */
+export const CUSTOMER_SHIPMENT_MESSAGES: Partial<Record<CustomerShipmentStatus, string>> = {
+    CREATED: "Kargonuz kargo firmasına teslim edildi",
+    IN_TRANSIT: "Kargonuz yolda",
+    DELIVERY_FAILED: "Teslimat yapılamadı, kargo firması tekrar deneyecek.",
+};

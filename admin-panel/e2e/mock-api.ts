@@ -1,7 +1,16 @@
 import type { Page, Route } from "@playwright/test";
 import type {
-    CartItemResponse, OrderResponse, PaymentResult, ProductResponse, ProfileResponse, Role,
+    AdminOrderResponse, CartItemResponse, OrderResponse, OrderStatus, PaymentResult, ProductResponse, ProfileResponse, Role,
 } from "../src/types/api";
+
+/** Sahte backend'in vereceği tek cevap. `body` metinse JSON olmayan (HTML) cevap gider. */
+export interface MockAnswer { status: number; body: unknown }
+
+/**
+ * Kargo isteğine verilecek cevap: hazır cevap, bağlantı kopması ("abort"), hiç cevap vermeme
+ * ("hang") ya da test serbest bırakana kadar bekleyen cevap (gate).
+ */
+export type ShipmentAnswer = MockAnswer | "abort" | "hang" | { gate: Promise<MockAnswer> };
 
 /**
  * Testler için sahte backend. Gerçek API'nin cevap biçimlerini (src/types/api.ts) kullanır ve
@@ -22,6 +31,18 @@ export interface MockState {
     /** Backend'e gelen ödeme istekleri (gövdeleriyle). */
     payments: { path: string; body: Record<string, unknown> }[];
     cancelled: number[];
+    /** Yönetici sipariş listesi (GET /api/admin/orders); kargo testleri bozuk veriyi de buraya koyar. */
+    adminOrders: AdminOrderResponse[];
+    /** GET /api/admin/orders isteği sayısı (liste yeniden yüklendi mi). */
+    listRequests: number;
+    /** Gelen kargo istekleri (kargoya ver / tekrar dene), gövdeleriyle (gövde yoksa null). */
+    shipmentRequests: { path: string; body: unknown }[];
+    /** Sıradaki kargo isteklerinin cevapları; boşsa istek başarılı sayılır ve gönderi REQUESTED olur. */
+    shipmentAnswers: ShipmentAnswer[];
+    /** Sıradaki PATCH .../status cevapları; boşsa durum değişir ve sipariş döner. */
+    statusPatchAnswers: MockAnswer[];
+    /** Gelen durum değiştirme istekleri. */
+    statusPatches: { id: number; status: OrderStatus }[];
     unknown: string[];
 }
 
@@ -39,6 +60,26 @@ export const order = (id: number, overrides: Partial<OrderResponse> = {}): Order
     ...overrides,
 });
 
+/** Yönetici listesindeki sipariş: hazırlanıyor, gönderisiz, kargoya verilemez (testler değiştirir). */
+export const adminOrder = (id: number, overrides: Partial<AdminOrderResponse> = {}): AdminOrderResponse => ({
+    ...order(id, { status: "PREPARING" }), canShip: false, shipment: null, ...overrides,
+});
+
+/**
+ * Sayfadaki konsol hata/uyarılarını ve yakalanmamış hataları toplar (test sonunda boş olmalı).
+ * Tarayıcının kendi ağ satırları ("Failed to load resource: ... 409") uygulama kodu değildir, sayılmaz.
+ */
+export function trackConsoleErrors(page: Page): string[] {
+    const errors: string[] = [];
+    page.on("console", (message) => {
+        if (message.type() !== "error" && message.type() !== "warning") return;
+        if (message.text().startsWith("Failed to load resource")) return;
+        errors.push(`${message.type()}: ${message.text()}`);
+    });
+    page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+    return errors;
+}
+
 export function newState(overrides: Partial<MockState> = {}): MockState {
     return {
         username: "musteri",
@@ -55,6 +96,12 @@ export function newState(overrides: Partial<MockState> = {}): MockState {
         statusAnswers: [],
         payments: [],
         cancelled: [],
+        adminOrders: [],
+        listRequests: 0,
+        shipmentRequests: [],
+        shipmentAnswers: [],
+        statusPatchAnswers: [],
+        statusPatches: [],
         unknown: [],
         ...overrides,
     };
@@ -62,6 +109,37 @@ export function newState(overrides: Partial<MockState> = {}): MockState {
 
 const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers, body: JSON.stringify(body) });
+
+/** Hazır cevabı gönderir: gövde metinse HTML olarak (ör. JSON olmayan 404). */
+const answer = (route: Route, { status, body }: MockAnswer) => (typeof body === "string"
+    ? route.fulfill({ status, contentType: "text/html", body })
+    : json(route, body, status));
+
+/** Arama: kullanıcı adı, alıcı adı, telefon ya da ürün adında geçen (büyük/küçük harf duyarsız). */
+const matchesQuery = (item: AdminOrderResponse, query: string): boolean => {
+    if (!query) return true;
+    const needle = query.toLocaleLowerCase("tr-TR");
+    return [item.username, item.firstName, item.lastName, item.phone, ...item.items.map((line) => line.productName)]
+        .some((text) => String(text).toLocaleLowerCase("tr-TR").includes(needle));
+};
+
+/** Kargo isteği başarılı: gönderi REQUESTED olur (tekrar denemede istek numarası bir artar). */
+function requestShipment(state: MockState, id: number): AdminOrderResponse | undefined {
+    const index = state.adminOrders.findIndex((item) => item.id === id);
+    const current = state.adminOrders[index];
+    if (!current) return undefined;
+    const updated: AdminOrderResponse = {
+        ...current,
+        canShip: false,
+        shipment: {
+            status: "REQUESTED", carrierName: null, trackingNumber: null, trackingUrl: null,
+            statusAt: "2026-11-23T10:00:00Z", requestNo: (current.shipment?.requestNo ?? 0) + 1,
+            failureReason: null, canRetry: false,
+        },
+    };
+    state.adminOrders[index] = updated;
+    return updated;
+}
 
 const cartResponse = (state: MockState): CartItemResponse[] => state.cart.flatMap((line) => {
     const item = state.products.find((candidate) => candidate.id === line.productId);
@@ -137,6 +215,40 @@ export async function mockBackend(page: Page, state: MockState): Promise<MockSta
             state.cancelled.push(id);
             state.orders = state.orders.map((item) => (item.id === id ? { ...item, status: "CANCELLED" } : item));
             return route.fulfill({ status: 204 });
+        }
+
+        if (path === "/api/admin/orders" && method === "GET") {
+            state.listRequests += 1;
+            const page = Number(url.searchParams.get("page") ?? 0);
+            const size = Number(url.searchParams.get("size") ?? 50);
+            const found = state.adminOrders.filter((item) => matchesQuery(item, url.searchParams.get("q") ?? ""));
+            return json(route, {
+                items: found.slice(page * size, (page + 1) * size), page, size,
+                totalItems: found.length, totalPages: Math.ceil(found.length / size),
+            });
+        }
+        if (path === "/api/admin/orders/stats") {
+            return json(route, { trendWindowDays: 7, topProducts: [], topCategories: [], trendingProducts: [], trendingCategories: [] });
+        }
+        if ((match = path.match(/^\/api\/admin\/orders\/(\d+)\/status$/)) && method === "PATCH") {
+            const id = Number(match[1]);
+            state.statusPatches.push({ id, status: body.status });
+            const planned = state.statusPatchAnswers.shift();
+            if (planned) return answer(route, planned);
+            state.adminOrders = state.adminOrders.map((item) => (item.id === id ? { ...item, status: body.status } : item));
+            return json(route, state.adminOrders.find((item) => item.id === id));
+        }
+        if ((match = path.match(/^\/api\/admin\/orders\/(\d+)\/shipment(\/retry)?$/)) && method === "POST") {
+            state.shipmentRequests.push({ path, body: request.postData() ? body : null });
+            const planned = state.shipmentAnswers.shift();
+            if (planned === "abort") return route.abort("failed");
+            if (planned === "hang") return new Promise<void>(() => { /* hiç cevap verilmez */ });
+            if (planned && "gate" in planned) return answer(route, await planned.gate);
+            if (planned) return answer(route, planned);
+            const updated = requestShipment(state, Number(match[1]));
+            return updated
+                ? json(route, updated, 202)
+                : json(route, { status: 404, code: "RESOURCE_NOT_FOUND", message: "Sipariş bulunamadı." }, 404);
         }
 
         state.unknown.push(`${method} ${path}`);
