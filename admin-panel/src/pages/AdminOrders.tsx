@@ -100,11 +100,14 @@ export default function AdminOrders() {
     // Liste isteği sürerken satıra yapılan yerel güncellemeler: o isteğin (eski) cevabı bunları ezmez.
     const localEdits = useRef(new Map<number, { order: AdminOrderResponse; seq: number }>());
 
-    // Arama, yazmayı bırakınca (300 ms) sunucuya gider ve ilk sayfadan başlar.
+    // Arama, yazmayı bırakınca (300 ms) sunucuya gider ve ilk sayfadan başlar. Arama metni değişmediyse
+    // (ör. sayfa ilk açıldığında) hiçbir şey yapılmaz; yoksa bu arada geçilen sayfa ilk sayfaya geri atlardı.
     useEffect(() => {
-        const timer = setTimeout(() => { setQuery(search.trim()); setPage(0); }, 300);
+        const next = search.trim();
+        if (next === query) return;
+        const timer = setTimeout(() => { setQuery(next); setPage(0); }, 300);
         return () => clearTimeout(timer);
-    }, [search]);
+    }, [search, query]);
 
     // Siparişler sunucudan sayfa sayfa gelir (arama ve kullanıcı filtresi sunucuda uygulanır).
     useEffect(() => {

@@ -410,6 +410,27 @@ test("A14: arama ve sayfalamadan sonra da kargoya verilen sipariş doğru olur",
     expect(errors).toEqual([]);
 });
 
+test("Sayfa açılır açılmaz 'Sonraki' basılırsa arama gecikmesi listeyi ilk sayfaya geri atmaz", async ({ page }) => {
+    // Aramanın 300 ms'lik zamanlayıcısı 1,5 sn'ye uzatılır: "Sonraki" kesin o çalışmadan basılmış olur
+    // (CI'da hızlı makinede kendiliğinden olan yarış).
+    await page.addInitScript(() => {
+        const original = window.setTimeout;
+        window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+            original(handler, timeout === 300 ? 1_500 : timeout, ...args)) as typeof window.setTimeout;
+    });
+    const orders = Array.from({ length: 51 }, (_, index) => adminOrder(index + 1));
+    const { state, errors } = await openAdminOrders(page, orders);
+
+    await page.getByRole("button", { name: "Sonraki ›" }).click();
+    await expect(row(page, 51)).toBeVisible();
+    const loadsBefore = state.listRequests;
+    await page.waitForTimeout(2_500); // uzatılmış arama gecikmesi ve olası (hatalı) yeniden yükleme geçsin
+    expect(state.listRequests).toBe(loadsBefore);
+    await expect(row(page, 51)).toBeVisible();
+    await expect(row(page, 1)).toHaveCount(0);
+    expect(errors).toEqual([]);
+});
+
 test("PATCH cevabındaki sipariş satırı günceller (canShip dahil); okunamayan cevapta yalnız durum değişir", async ({ page }) => {
     const pending = adminOrder(1, { status: "PAYMENT_PENDING" });
     const { errors } = await openAdminOrders(page, [pending, adminOrder(2, { status: "PAYMENT_PENDING" })], {
