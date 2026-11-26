@@ -25,6 +25,9 @@ ALTER ROLE backend_app PASSWORD :'backend_password';
 ALTER ROLE iyzico_app PASSWORD :'iyzico_password';
 ALTER ROLE cargo_app PASSWORD :'cargo_password';
 GRANT CONNECT ON DATABASE eticaret TO backend_app, iyzico_app, cargo_app;
+-- iyzico-service'in ilk Prisma migration'ı "CREATE SCHEMA IF NOT EXISTS iyzico" çalıştırır; Postgres bu komutta
+-- şema var olsa bile veritabanı düzeyinde CREATE yetkisi ister. Uygulanmış migration değiştirilemez (checksum).
+GRANT CREATE ON DATABASE eticaret TO iyzico_app;
 
 -- ---------------------------------------------------------------- public → backend_app
 ALTER SCHEMA public OWNER TO backend_app;
