@@ -31,6 +31,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * outbox'ta kalır ve tekrar denenir (en az bir kez teslim; alıcı tekrar gelen mesajı ayıklar).
  *
  * Tur iki şekilde başlar: mesaj yazan işlem kaydedilince hemen, yedek olarak da yarım saniyede bir.
+ *
+ * Kart verisi: 2D ödeme komutunun (ChargeRequested) payload'ı request.card alanında kartı şifresiz
+ * içerir. Bu alan, mesaj RabbitMQ'ya iletilip yayın onayı gelene kadar outbox satırında durur; onay
+ * gelince publishBatch aynı işlemde publishedAt'i yazar ve {@link #withoutCard} ile kartı satırdan
+ * siler. Onay gelmezse kart satırda kalır ve mesaj tekrar denenir. Satırın kendisi gönderildikten
+ * KEEP_PUBLISHED (7 gün) sonra deleteOldPublished ile silinir. Payload hiçbir zaman loglanmaz.
  */
 @Component
 public class OutboxRelay {
@@ -51,7 +57,11 @@ public class OutboxRelay {
         this.transactions = transactions;
     }
 
-    /** Mesajı kaydeder; çağıran işlem kaydedilince hemen gönderilir. */
+    /**
+     * Mesajı çağıranın işleminde kaydeder; işlem kaydedilince hemen gönderilir. payload olduğu gibi
+     * JSON'a yazılır: 2D ödeme komutunda kart şifresiz olarak satıra girer ve yayın onayından sonra
+     * publishBatch içinde withoutCard ile silinir.
+     */
     public void enqueue(String exchange, String routingKey, String type, Object payload) {
         OutboxMessage message = new OutboxMessage();
         message.setId(UUID.randomUUID());

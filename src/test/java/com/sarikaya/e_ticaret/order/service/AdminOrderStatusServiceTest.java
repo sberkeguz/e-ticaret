@@ -39,7 +39,7 @@ class AdminOrderStatusServiceTest {
         order = new Order();
         order.setId(10L);
         order.setStatus(OrderStatus.PREPARING);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(order));
     }
 
     @Test
@@ -63,7 +63,7 @@ class AdminOrderStatusServiceTest {
 
     @Test
     void unpaidOrderCannotBeShipped() {
-        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment(PaymentStatus.PENDING)));
+        when(paymentRepository.findByOrderIdForUpdate(10L)).thenReturn(Optional.of(payment(PaymentStatus.PENDING)));
 
         assertThrows(BadRequestException.class, () -> service.changeStatus(10L, "SHIPPED", "1.2.3.4"));
 
@@ -72,7 +72,7 @@ class AdminOrderStatusServiceTest {
 
     @Test
     void paidOrderCanBeShipped() {
-        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.of(payment(PaymentStatus.PAID)));
+        when(paymentRepository.findByOrderIdForUpdate(10L)).thenReturn(Optional.of(payment(PaymentStatus.PAID)));
 
         service.changeStatus(10L, "SHIPPED", "1.2.3.4");
 
@@ -82,7 +82,7 @@ class AdminOrderStatusServiceTest {
 
     @Test
     void orderWithoutPaymentRecordCanBeShipped() {
-        when(paymentRepository.findByOrder_Id(10L)).thenReturn(Optional.empty());
+        when(paymentRepository.findByOrderIdForUpdate(10L)).thenReturn(Optional.empty());
 
         service.changeStatus(10L, "SHIPPED", "1.2.3.4");
 

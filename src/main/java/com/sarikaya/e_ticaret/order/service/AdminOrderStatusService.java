@@ -13,11 +13,16 @@ import com.sarikaya.e_ticaret.payment.service.PaymentService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+import java.util.Set;
+
 @Service
 public class AdminOrderStatusService {
 
     private static final OrderStatus ORDER_CANCELLED = OrderStatus.CANCELLED;
     private static final PaymentStatus PAYMENT_PAID = PaymentStatus.PAID;
+    /** Mal depodan çıkmış: kargoda ya da teslim edilmiş. */
+    private static final Set<OrderStatus> OUT_FOR_DELIVERY = Set.of(OrderStatus.SHIPPED, OrderStatus.DELIVERED);
 
     private final OrderService orderService;
     private final PaymentService paymentService;
@@ -34,13 +39,28 @@ public class AdminOrderStatusService {
         this.paymentRepository = paymentRepository;
     }
 
+    /**
+     * Admin'in sipariş durumu değişikliği. Tek işlemde çalışır ve önce ödeme satırını, sonra sipariş
+     * satırını kilitler (projedeki kilit sırası her yerde ödeme → sipariş: PaymentService.cancelByAdmin
+     * ve PaymentEventHandler da önce ödemeyi kilitler). Böylece aynı siparişe gelen eşzamanlı admin
+     * istekleri ve ödeme olayları sırayla işlenir; ikinci istek ilkinin sonucunu görerek karar verir.
+     *
+     * Kurallar:
+     *  - İptal edilmiş sipariş yeniden açılamaz.
+     *  - Kargoya verilmiş (SHIPPED) ya da teslim edilmiş (DELIVERED) sipariş iptal edilemez; iptal parayı
+     *    iade edip stoğu geri eklerdi.
+     *  - PREPARING/SHIPPED/DELIVERED'a geçiş yalnızca ödeme PAID ise. Ödeme kaydı yoksa (ödeme akışından
+     *    önceki eski siparişler) yalnızca zaten satılmış (OrderStatus.SOLD) bir sipariş ilerleyebilir.
+     */
     @Transactional
     public OrderResponse changeStatus(Long orderId, String requestedStatus, String adminIp) {
         OrderStatus newStatus = OrderStatus.parse(requestedStatus);
         if (newStatus == null || !OrderStatus.ADMIN_SELECTABLE.contains(newStatus)) {
             throw new BadRequestException("Geçersiz sipariş durumu.");
         }
-        Order order = orderRepository.findById(orderId)
+        // Kilit sırası: önce ödeme, sonra sipariş (deadlock olmasın diye; bkz. sınıf belgesi).
+        Optional<Payment> payment = paymentRepository.findByOrderIdForUpdate(orderId);
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı."));
 
         boolean orderIsAlreadyCancelled = ORDER_CANCELLED.equals(order.getStatus());
@@ -51,18 +71,20 @@ public class AdminOrderStatusService {
         }
 
         if (adminWantsToCancel) {
+            if (OUT_FOR_DELIVERY.contains(order.getStatus())) {
+                throw new BadRequestException("Kargoya verilmiş sipariş iptal edilemez.");
+            }
+            // Aynı işlemde çalışır; ödeme ve sipariş satırları bu işlemde zaten kilitli.
             paymentService.cancelByAdmin(orderId, adminIp);
             return orderService.updateStatus(orderId, newStatus);
         }
 
-        PaymentStatus paymentStatus = paymentRepository.findByOrder_Id(orderId)
-                .map(Payment::getStatus)
-                .orElse(null);
+        PaymentStatus paymentStatus = payment.map(Payment::getStatus).orElse(null);
+        boolean allowed = paymentStatus == null
+                ? OrderStatus.SOLD.contains(order.getStatus())
+                : PAYMENT_PAID.equals(paymentStatus);
 
-        boolean orderHasPaymentRecord = paymentStatus != null;
-        boolean paymentIsReceived = PAYMENT_PAID.equals(paymentStatus);
-
-        if (orderHasPaymentRecord && !paymentIsReceived) {
+        if (!allowed) {
             throw new BadRequestException("Ödemesi alınmamış sipariş hazırlanamaz veya kargoya verilemez.");
         }
 

@@ -1,14 +1,17 @@
 package com.sarikaya.e_ticaret.order.repository;
 
 import com.sarikaya.e_ticaret.order.entity.Order;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
     @EntityGraph(attributePaths = {"items", "user"})
@@ -39,4 +42,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @EntityGraph(attributePaths = {"items","user"})
     List<Order> findAllByUserUsernameOrderByCreatedAtDesc(String username);
+
+    /**
+     * Siparişi satır kilidiyle (SELECT ... FOR UPDATE) okur; kilit işlem bitene kadar tutulur.
+     * Kilit sırası projede her yerde önce ödeme, sonra sipariştir: ödeme satırı olan bir sipariş
+     * için önce PaymentRepository.findByOrderIdForUpdate çağrılmalıdır (deadlock olmasın diye).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from Order o where o.id = :id")
+    Optional<Order> findByIdForUpdate(@Param("id") Long id);
 }
