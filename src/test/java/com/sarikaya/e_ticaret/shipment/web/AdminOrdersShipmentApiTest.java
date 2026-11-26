@@ -32,6 +32,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -94,6 +95,39 @@ class AdminOrdersShipmentApiTest {
         assertEquals("Kargo servisi ödemeyi onaylı görmedi; ödemeyi kontrol edip tekrar deneyin.",
                 shipment.get("failureReason").asString());
         assertFalse(body.contains("PAYMENT_NOT_CONFIRMED"), "iç kod dönmemeli");
+    }
+
+    /**
+     * Ö3: teslimat bilgisi cargo-service'in kabul etmeyeceği siparişte liste canShip=false döner ve
+     * "Kargoya ver" de 409 verir (düğme gösterilip reddedilmez). Yeni alan eklenmez.
+     */
+    @Test
+    void canShipFalseWhenShipmentRequestWouldBeRejected() throws Exception {
+        User customer = data.user(Role.USER);
+        Order blankName = data.order(customer, OrderStatus.PREPARING);
+        blankName.setFirstName("   ");
+        orders.saveAndFlush(blankName);
+        data.payment(blankName, PaymentStatus.PAID);
+        Order unsafeAddress = data.order(customer, OrderStatus.PREPARING);
+        unsafeAddress.setAddress("Sokak\u0001 No 1");
+        orders.saveAndFlush(unsafeAddress);
+        data.payment(unsafeAddress, PaymentStatus.PAID);
+        Order noItems = data.order(customer, OrderStatus.PREPARING, false);
+        data.payment(noItems, PaymentStatus.PAID);
+
+        String body = mvc.perform(get("/api/admin/orders").param("user", customer.getUsername()).with(user(admin)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode items = json.readTree(body).get("items");
+        assertEquals(3, items.size());
+        for (Order order : new Order[]{blankName, unsafeAddress, noItems}) {
+            JsonNode node = byId(items, order.getId());
+            assertFalse(node.get("canShip").asBoolean(), "kargoya verilemeyecek sipariş: " + order.getId());
+            assertTrue(node.get("shipment").isNull());
+            mvc.perform(post("/api/admin/orders/" + order.getId() + "/shipment").with(user(admin)))
+                    .andExpect(status().isConflict());
+        }
     }
 
     @Test

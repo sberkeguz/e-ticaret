@@ -40,7 +40,7 @@ test("B2: kargoya verilen siparişte firma, takip numarası ve https takip bağl
     await expect(info).toContainText("Hızlı Kargo");
     await expect(info).toContainText(TRACKING);
     // Başlık adım çubuğundaki "Kargoya verildi"yi tekrarlamaz.
-    await expect(info).toContainText("Kargonuz kargo firmasına teslim edildi");
+    await expect(info).toContainText("Kargonuz kargoya verildi.");
     await expect(info).not.toContainText("Kargoya verildi");
     const link = info.getByRole("link", { name: "Kargonuzu takip edin" });
     await expect(link).toHaveAttribute("href", "https://kargo.example.com/takip?ref=abc");

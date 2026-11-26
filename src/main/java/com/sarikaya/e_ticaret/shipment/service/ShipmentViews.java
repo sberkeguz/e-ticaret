@@ -11,6 +11,7 @@ import com.sarikaya.e_ticaret.shipment.dto.AdminShipment;
 import com.sarikaya.e_ticaret.shipment.dto.CustomerShipment;
 import com.sarikaya.e_ticaret.shipment.entity.OrderShipment;
 import com.sarikaya.e_ticaret.shipment.entity.ShipmentStatus;
+import com.sarikaya.e_ticaret.shipment.messaging.ShipmentRequested;
 import com.sarikaya.e_ticaret.shipment.repository.OrderShipmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,8 +27,11 @@ import java.util.stream.Collectors;
 /**
  * Siparişlere kargo görünümü ekler. Gönderiler ve ödeme durumları sayfa başına tek sorguyla yüklenir
  * (sipariş başına sorgu yok).
- *  - Yönetici: canShip = PREPARING + ödeme PAID + gönderi yok; gönderide failureReason (yalnız FAILED,
- *    sabit metin) ve canRetry = FAILED + PREPARING + ödeme PAID (retry'ın kabul koşuluyla aynı).
+ *  - Yönetici: canShip = PREPARING + ödeme PAID + gönderi yok + alıcı/koli bilgisi cargo-service'in kabul
+ *    edeceği biçimde ("Kargoya ver" ön kontrolüyle aynı kural: {@link ShipmentRequested#rejectionOf}, ek sorgu
+ *    yok; reddedilecekse yalnız canShip false olur, neden alanı yoktur); gönderide failureReason (yalnız FAILED,
+ *    sabit metin) ve canRetry = FAILED + PREPARING + ödeme PAID + aynı alıcı/koli kontrolü (retry'ın kabul
+ *    koşuluyla aynı).
  *  - Müşteri (S1): yalnız CREATED / IN_TRANSIT / DELIVERED / DELIVERY_FAILED ve takip no doluyken
  *    gösterilir; REQUESTED, FAILED ya da takip nosuz gönderi null'dır.
  */
@@ -75,7 +79,10 @@ public class ShipmentViews {
         return orders.stream().map(order -> {
             OrderShipment shipment = byOrder.get(order.id());
             boolean eligible = order.status() == OrderStatus.PREPARING && paid.contains(order.id());
-            return AdminOrderResponse.of(order, shipment == null && eligible, adminView(shipment, eligible));
+            // Komut ön kontrolü hem "Kargoya ver" hem "Tekrar dene" için aynı (ShipmentService.command).
+            boolean sendable = eligible && ShipmentRequested.rejectionOf(order) == null;
+            boolean canShip = shipment == null && sendable;
+            return AdminOrderResponse.of(order, canShip, adminView(shipment, sendable));
         }).toList();
     }
 
@@ -88,7 +95,7 @@ public class ShipmentViews {
         return orders.stream().map(OrderResponse::id).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    /** eligible: sipariş PREPARING ve ödeme PAID (ShipmentService.retry'ın kabul koşulu). */
+    /** sendable: sipariş PREPARING, ödeme PAID ve komut ön kontrolü geçer (ShipmentService.retry'ın kabul koşulu). */
     private AdminShipment adminView(OrderShipment shipment, boolean eligible) {
         if (shipment == null) {
             return null;

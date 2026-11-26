@@ -138,17 +138,15 @@ public class ShipmentService {
     /** Komutu kurar; cargo-service'in reddedeceği alıcı/koli bilgisinde 409 (alan değeri söylenmez). */
     private ShipmentRequested command(UUID messageId, Order order, int requestNo, String conflictCode) {
         ShipmentRequested command = ShipmentRequested.forOrder(messageId, order, requestNo, currentTraceId(), Instant.now());
-        ShipmentRequested.RecipientProblem problem = command.recipient().problem();
-        if (problem == ShipmentRequested.RecipientProblem.UNSAFE_CHARACTER) {
-            throw new ConflictException(conflictCode, UNSAFE_RECIPIENT);
+        ShipmentRequested.Rejection rejection = command.rejection();
+        if (rejection == null) {
+            return command;
         }
-        if (problem == ShipmentRequested.RecipientProblem.MISSING) {
-            throw new ConflictException(conflictCode, MISSING_RECIPIENT);
-        }
-        if (!command.parcel().valid()) {
-            throw new ConflictException(conflictCode, INVALID_PARCEL);
-        }
-        return command;
+        throw new ConflictException(conflictCode, switch (rejection) {
+            case UNSAFE_RECIPIENT -> UNSAFE_RECIPIENT;
+            case MISSING_RECIPIENT -> MISSING_RECIPIENT;
+            case INVALID_PARCEL -> INVALID_PARCEL;
+        });
     }
 
     /** İsteğin izleme numarası (W3C, 32 hex); yoksa null (cargo-service kendisi üretir). */

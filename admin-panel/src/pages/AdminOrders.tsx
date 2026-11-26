@@ -192,7 +192,7 @@ export default function AdminOrders() {
 
     // Kargo komutu kabul edildi: okunabilen cevap satırı günceller, okunamayan cevapta liste yeniden yüklenir.
     const shipmentAccepted = (orderId: number, raw: unknown, command: "ship" | "retry") => {
-        setSuccess(command === "ship" ? `#${orderId} kargoya verildi.` : `#${orderId} için kargo yeniden istendi.`);
+        setSuccess(command === "ship" ? `#${orderId} için kargo kaydı istendi.` : `#${orderId} için kargo yeniden istendi.`);
         const updated = parseCommandOrder(raw, orderId);
         if (updated) updateRow(orderId, () => updated);
         else setReloadKey((key) => key + 1);
@@ -238,8 +238,12 @@ export default function AdminOrders() {
                 </p>
             )}
 
-            {success && <p className="success-banner" role="status">{success}</p>}
-            {(error || loadError) && <p className="error-banner" role="alert">{[error, loadError].filter(Boolean).join(" ")}</p>}
+            {/* Bantlar yapışkan: sayfa aşağı kaydırılmışken yapılan işlemin sonucu da görünür alanda çıkar,
+                işlem yapılan satır yerinde kalır. role="status"/"alert" ekran okuyucuya duyurur. */}
+            <div className="sticky-banners">
+                {success && <p className="success-banner" role="status">{success}</p>}
+                {(error || loadError) && <p className="error-banner" role="alert">{[error, loadError].filter(Boolean).join(" ")}</p>}
+            </div>
             {userFilter && (
                 <p style={{ marginBottom: 14 }}>
                     <button className="button button-quiet button-small" onClick={() => { setParams({}); setPage(0); }}>Kullanıcı: {userFilter} ✕</button>
@@ -260,14 +264,14 @@ export default function AdminOrders() {
                     <div className="table-wrap">
                         <table className="data-table">
                             <thead>
-                                <tr><th>No</th><th>Kullanıcı</th><th>Alıcı</th><th>Ürünler</th><th>Tutar</th><th>Tarih</th><th>Durum</th><th>Kargo</th></tr>
+                                <tr><th className="sticky-col">No</th><th>Kullanıcı</th><th>Alıcı</th><th>Ürünler</th><th>Tutar</th><th>Tarih</th><th>Durum</th><th>Kargo</th></tr>
                             </thead>
                             <tbody>
                                 {orders.map((order) => {
                                     const { locked, options } = statusOptions(order);
                                     return (
                                         <tr key={order.id} onClick={() => setOpenId(openId === order.id ? null : order.id)} style={{ cursor: "pointer", verticalAlign: "top" }}>
-                                            <td>#{order.id}</td>
+                                            <td className="sticky-col">#{order.id}</td>
                                             <td><b>{order.username}</b></td>
                                             <td>
                                                 {order.firstName} {order.lastName}

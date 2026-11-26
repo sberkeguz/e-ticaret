@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { AdminOrderResponse, AdminShipment, ShipmentStatus } from "../src/types/api";
 import { adminOrder, mockBackend, newState, trackConsoleErrors, type MockAnswer, type MockState } from "./mock-api";
 
@@ -448,7 +448,7 @@ test("başarılı kargoya ver ve tekrar dene kısa başarı bandı gösterir; so
     const success = page.locator(".success-banner");
 
     await shipFromRow(page, 1);
-    await expect(success).toHaveText("#1 kargoya verildi.");
+    await expect(success).toHaveText("#1 için kargo kaydı istendi.");
 
     await shipmentCell(page, 2).getByRole("button", { name: "Tekrar dene" }).click();
     await dialog(page).getByRole("button", { name: "Evet, tekrar dene" }).click();
@@ -494,3 +494,72 @@ test("1024 px genişlikte durum kutusu ve kargo hücresindeki metinler kesilmez"
     }
     expect(errors).toEqual([]);
 });
+
+/** Konumun gerçekten görünür olduğunu (başka bir öğenin altında kalmadığını) da denetler. */
+async function visibleAtCenter(locator: Locator) {
+    await expect(locator).toBeInViewport();
+    return locator.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit !== null && (hit === element || element.contains(hit));
+    });
+}
+
+const scrollToBottom = (page: Page) => page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+
+test("Ö1: sayfa aşağı kaydırılmışken kargo ve durum işleminin başarı/hata bandı görünür alanda kalır", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const orders = Array.from({ length: 30 }, (_, index) => shippable(index + 1));
+    orders[27] = adminOrder(28, { status: "PAYMENT_PENDING" });
+    orders[29] = adminOrder(30, { shipment: shipment("FAILED", { canRetry: true }) });
+    const { errors } = await openAdminOrders(page, orders, {
+        shipmentAnswers: [{ status: 202, body: requested(shippable(29)) },
+            { status: 500, body: { status: 500, code: "INTERNAL_ERROR", message: "Beklenmeyen bir hata oluştu." } }],
+        statusPatchAnswers: [{ status: 409, body: { status: 409, code: "CONFLICT", message: "Durum değiştirilemedi." } }],
+    });
+    const success = page.locator(".success-banner");
+
+    await scrollToBottom(page);
+    await expect(page.getByRole("heading", { name: "Siparişler" })).not.toBeInViewport();
+    await shipFromRow(page, 29);
+    await expect(success).toHaveText("#29 için kargo kaydı istendi.");
+    await expect(success).toHaveAttribute("role", "status");
+    expect(await visibleAtCenter(success)).toBe(true);
+    await expect(row(page, 29)).toBeInViewport();
+
+    await scrollToBottom(page);
+    await shipmentCell(page, 30).getByRole("button", { name: "Tekrar dene" }).click();
+    await dialog(page).getByRole("button", { name: "Evet, tekrar dene" }).click();
+    await expect(banner(page)).toHaveText("#30: Beklenmeyen bir hata oluştu.");
+    expect(await visibleAtCenter(banner(page))).toBe(true);
+
+    await scrollToBottom(page);
+    await statusSelect(page, 28).selectOption("PREPARING");
+    await expect(banner(page)).toHaveText("#28: Durum değiştirilemedi.");
+    expect(await visibleAtCenter(banner(page))).toBe(true);
+    await expect(statusSelect(page, 28)).toBeInViewport();
+    expect(errors).toEqual([]);
+});
+
+for (const width of [375, 1024]) {
+    test(`Ö2: ${width} px genişlikte tablo en sağa kaydırılınca sipariş numarası kargo sütunuyla birlikte görünür`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 });
+        const { errors } = await openAdminOrders(page, [shippable(1), adminOrder(2, { shipment: shipment("FAILED", { canRetry: true }) })]);
+
+        const scrolled = await page.locator(".table-wrap").evaluate((wrap) => {
+            wrap.scrollLeft = wrap.scrollWidth;
+            return wrap.scrollLeft > 0;
+        });
+        expect(scrolled, "tablo yatay kaymalı").toBe(true);
+        // Satırlar dikeyde görünür alana gelsin (yalnız sayfa kayar, tablonun yatay konumu değişmez).
+        await scrollToBottom(page);
+        expect(await page.locator(".table-wrap").evaluate((wrap) => wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 1)).toBe(true);
+
+        for (const id of [1, 2]) {
+            const number = row(page, id).getByRole("cell", { name: `#${id}`, exact: true });
+            expect(await visibleAtCenter(number), `#${id} numarası görünmeli`).toBe(true);
+            expect(await visibleAtCenter(shipmentCell(page, id)), `#${id} kargo hücresi görünmeli`).toBe(true);
+        }
+        expect(errors).toEqual([]);
+    });
+}

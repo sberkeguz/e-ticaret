@@ -108,6 +108,12 @@ h1, h2, h3, p { margin-top: 0; }
 /* Sipariş tablosu: dar ekranda durum kutusu ve kargo hücresi daralıp yazıyı kesmesin (tablo yatay kayar). */
 .data-table td select.input { min-width: 170px; }
 .data-table td.shipment-cell { min-width: 190px; }
+/* Tablo yatay kayınca ilk sütun (sipariş no) solda sabit kalır; altından kayan hücreler görünmesin diye zeminli. */
+.data-table .sticky-col { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--line); }
+.data-table tbody tr:hover .sticky-col { background: #fafbff; }
+/* İşlem sonucu bantları sayfa kaydırılınca üstte yapışık kalır (tablonun yapışkan sütunundan üstte). */
+.sticky-banners { position: sticky; z-index: 4; top: 12px; }
+.sticky-banners > p { box-shadow: 0 6px 18px #202a4a14; }
 .cell-primary { color: var(--ink); font-weight: 700; }
 .cell-sub { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }

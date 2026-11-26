@@ -43,7 +43,7 @@ export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
 
 /** Müşteriye durum adı yerine gösterilen açıklama (olmayan durumda durum adı gösterilir). */
 export const CUSTOMER_SHIPMENT_MESSAGES: Partial<Record<CustomerShipmentStatus, string>> = {
-    CREATED: "Kargonuz kargo firmasına teslim edildi",
+    CREATED: "Kargonuz kargoya verildi.",
     IN_TRANSIT: "Kargonuz yolda",
     DELIVERY_FAILED: "Teslimat yapılamadı, kargo firması tekrar deneyecek.",
 };

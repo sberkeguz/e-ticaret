@@ -172,9 +172,61 @@ class ShipmentViewsTest {
         assertEquals(9L, one.id());
     }
 
+    /**
+     * Ö3: canShip, "Kargoya ver"in komut ön kontrolüyle aynı kuralı kullanır; cargo-service'in reddedeceği
+     * alıcı ya da koli bilgisinde (eksik, yalnız boşluk, geçersiz karakter, kalemsiz, eksi tutar) false.
+     */
+    @Test
+    void canShipFalseWhenCargoServiceWouldRejectRecipientOrParcel() {
+        when(payments.findOrderIdsWithStatus(anyCollection(), eq(PaymentStatus.PAID)))
+                .thenReturn(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L));
+        when(shipments.findAllByOrderIdIn(anyCollection())).thenReturn(List.of());
+        List<OrderResponse.Item> oneItem = List.of(new OrderResponse.Item(16L, "Ürün", new BigDecimal("10.00"), 1));
+
+        List<AdminOrderResponse> items = views.adminPage(new OrderPageResponse(List.of(
+                order(1L, OrderStatus.PREPARING),                                                    // geçerli → true
+                order(2L, null, "Mah", "Adres", new BigDecimal("10.00"), oneItem),                   // ad yok
+                order(3L, "Ad", "   ", "Adres", new BigDecimal("10.00"), oneItem),                   // yalnız boşluk
+                order(4L, "Ad", "Mah", " ", new BigDecimal("10.00"), oneItem),                  // .NET boşluğu
+                order(5L, "Ad", "Mah", "Adres\u0001", new BigDecimal("10.00"), oneItem),             // geçersiz karakter
+                order(6L, "Ad", "Mah", "Adres", new BigDecimal("10.00"), List.of()),                 // kalem yok
+                order(7L, "Ad", "Mah", "Adres", new BigDecimal("-1.00"), oneItem),                   // eksi tutar
+                order(8L, "Ad", "Mah", "Adres", null, oneItem)),                                     // tutar yok
+                0, 50, 8, 1)).items();
+
+        assertEquals(List.of(true, false, false, false, false, false, false, false),
+                items.stream().map(AdminOrderResponse::canShip).toList());
+        verify(shipments, times(1)).findAllByOrderIdIn(anyCollection());
+        verify(payments, times(1)).findOrderIdsWithStatus(anyCollection(), eq(PaymentStatus.PAID));
+    }
+
+    /** canRetry de aynı ön kontrolü kullanır: FAILED gönderide teslimat bilgisi reddedilecekse "Tekrar dene" yok. */
+    @Test
+    void canRetryFalseWhenCargoServiceWouldRejectRecipient() {
+        when(payments.findOrderIdsWithStatus(anyCollection(), eq(PaymentStatus.PAID))).thenReturn(List.of(1L, 2L));
+        when(shipments.findAllByOrderIdIn(anyCollection()))
+                .thenReturn(List.of(shipment(1L, ShipmentStatus.FAILED), shipment(2L, ShipmentStatus.FAILED)));
+        List<OrderResponse.Item> oneItem = List.of(new OrderResponse.Item(16L, "Ürün", new BigDecimal("10.00"), 1));
+
+        List<AdminOrderResponse> items = views.adminPage(new OrderPageResponse(List.of(
+                order(1L, OrderStatus.PREPARING),
+                order(2L, "Ad", " ", "Adres", new BigDecimal("10.00"), oneItem)),
+                0, 50, 2, 1)).items();
+
+        assertEquals(List.of(true, false), items.stream().map(item -> item.shipment().canRetry()).toList());
+        assertNotNull(items.get(1).shipment().failureReason(), "neden metni yine gösterilir");
+    }
+
     private static OrderResponse order(long id, OrderStatus status) {
         return new OrderResponse(id, "u", "Ad", "Soyad", "0555", "İl", "İlçe", "Mah", "Adres",
-                new BigDecimal("10.00"), status, AT, List.of(), false, null);
+                new BigDecimal("10.00"), status, AT,
+                List.of(new OrderResponse.Item(16L, "Ürün", new BigDecimal("5.00"), 2)), false, null);
+    }
+
+    private static OrderResponse order(long id, String firstName, String neighborhood, String address, BigDecimal total,
+                                       List<OrderResponse.Item> items) {
+        return new OrderResponse(id, "u", firstName, "Soyad", "0555", "İl", "İlçe", neighborhood, address,
+                total, OrderStatus.PREPARING, AT, items, false, null);
     }
 
     private static OrderShipment shipment(long orderId, ShipmentStatus status) {
