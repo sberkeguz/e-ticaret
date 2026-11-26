@@ -5,12 +5,12 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Uygulama (EF Core 10 hattı; net10.0 hedeflendiği için 11.x kullanılmaz) -->
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.4" />
     <PackageVersion Include="EFCore.NamingConventions" Version="10.0.1" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.15" />
     <!-- RabbitMQ: resmi istemcinin 7.x async API'si (MassTransit kullanılmaz) -->
-    <PackageVersion Include="RabbitMQ.Client" Version="7.2.2" />
+    <PackageVersion Include="RabbitMQ.Client" Version="7.3.0" />
     <!-- Testler -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.15" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />
