@@ -16,9 +16,9 @@
     "prisma:generate": "prisma generate"
   },
   "dependencies": {
-    "@nestjs/common": "^12.5.0",
-    "@nestjs/core": "^12.5.0",
-    "@nestjs/platform-express": "^12.5.0",
+    "@nestjs/common": "^12.6.0",
+    "@nestjs/core": "^12.6.0",
+    "@nestjs/platform-express": "^12.6.0",
     "@nestjs/swagger": "^12.1.2",
     "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.301.2",
@@ -34,7 +34,7 @@
     "@opentelemetry/semantic-conventions": "^1.45.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
-    "amqplib": "^2.3.1",
+    "amqplib": "^2.4.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "pg": "^8.23.1",
@@ -43,10 +43,10 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "@nestjs/testing": "^12.5.0",
+    "@nestjs/testing": "^12.6.0",
     "@swc/core": "^1.16.22",
-    "@testcontainers/postgresql": "^12.2.1",
-    "@testcontainers/rabbitmq": "^12.2.1",
+    "@testcontainers/postgresql": "^12.2.2",
+    "@testcontainers/rabbitmq": "^12.2.2",
     "@types/express": "^5.0.6",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
@@ -54,7 +54,7 @@
     "supertest": "^7.3.2",
     "typescript": "^5.9.3",
     "unplugin-swc": "^2.0.0",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "allowScripts": {
     "prisma@7.10.1": true,
