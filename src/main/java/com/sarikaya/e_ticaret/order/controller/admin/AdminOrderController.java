@@ -1,10 +1,11 @@
 package com.sarikaya.e_ticaret.order.controller.admin;
 
-import com.sarikaya.e_ticaret.order.dto.OrderPageResponse;
-import com.sarikaya.e_ticaret.order.dto.OrderResponse;
+import com.sarikaya.e_ticaret.order.dto.AdminOrderPageResponse;
+import com.sarikaya.e_ticaret.order.dto.AdminOrderResponse;
 import com.sarikaya.e_ticaret.order.dto.OrderStatsResponse;
 import com.sarikaya.e_ticaret.order.service.AdminOrderStatusService;
 import com.sarikaya.e_ticaret.order.service.OrderStatsService;
+import com.sarikaya.e_ticaret.shipment.service.ShipmentViews;
 import jakarta.servlet.http.HttpServletRequest;
 import com.sarikaya.e_ticaret.order.service.OrderService;
 import org.springframework.web.bind.annotation.*;
@@ -19,13 +20,16 @@ public class AdminOrderController {
     private final OrderService orderService;
     private final OrderStatsService orderStatsService;
     private final AdminOrderStatusService adminOrderStatusService;
+    private final ShipmentViews shipmentViews;
 
     public AdminOrderController(OrderService orderService,
                                 OrderStatsService orderStatsService,
-                                AdminOrderStatusService adminOrderStatusService) {
+                                AdminOrderStatusService adminOrderStatusService,
+                                ShipmentViews shipmentViews) {
         this.orderService = orderService;
         this.orderStatsService = orderStatsService;
         this.adminOrderStatusService = adminOrderStatusService;
+        this.shipmentViews = shipmentViews;
     }
 
     @GetMapping("/stats")
@@ -33,21 +37,25 @@ public class AdminOrderController {
         return orderStatsService.stats();
     }
 
-    /** Siparişler, en yeniler önce. q: kullanıcı adı, ad, soyad, telefon veya ürün adında arar. */
+    /**
+     * Siparişler, en yeniler önce, kargo alanlarıyla (canShip, shipment). q: kullanıcı adı, ad, soyad,
+     * telefon veya ürün adında arar.
+     */
     @GetMapping
-    public OrderPageResponse listOrders(@RequestParam(defaultValue = "0") int page,
+    public AdminOrderPageResponse listOrders(@RequestParam(defaultValue = "0") int page,
                                         @RequestParam(defaultValue = "50") int size,
                                         @RequestParam(defaultValue = "") String q,
                                         @RequestParam(defaultValue = "") String user) {
-        return orderService.findPage(page, size, q, user);
+        return shipmentViews.adminPage(orderService.findPage(page, size, q, user));
     }
 
     @PatchMapping("/{id}/status")
-    public OrderResponse updateStatus(@PathVariable Long id,
+    public AdminOrderResponse updateStatus(@PathVariable Long id,
                                       @RequestBody Map<String, String> body,
                                       HttpServletRequest request) {
         String newStatus = body.get("status");
         String adminIp = request.getRemoteAddr();
-        return adminOrderStatusService.changeStatus(id, newStatus, adminIp);
+        // Kargo görünümü durum değişikliğinin işlemi kaydedildikten sonra okunur.
+        return shipmentViews.adminOne(adminOrderStatusService.changeStatus(id, newStatus, adminIp));
     }
 }

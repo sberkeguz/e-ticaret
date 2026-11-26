@@ -56,6 +56,40 @@ class MessageRetriesTest {
         verify(operations).waitForConfirmsOrDie(anyLong());
     }
 
+    @Test
+    void shipmentEventsUseTheirOwnRetryAndDeadLetterQueues() {
+        RetryRoute route = new RetryRoute("backend.shipment-events");
+
+        assertEquals("backend.shipment-events.retry.1", retryAfter(0, route));
+        assertEquals("backend.shipment-events.retry.2", retryAfter(1, route));
+        assertEquals("backend.shipment-events.retry.3", retryAfter(2, route));
+        assertEquals("backend.shipment-events.dlq", retryAfter(3, route));
+    }
+
+    @Test
+    void permanentShipmentFailureGoesStraightToShipmentDeadLetters() {
+        Message message = message(0);
+
+        retries.handleFailure(message, new IllegalStateException("bozuk olay"), false,
+                new RetryRoute("backend.shipment-events"));
+
+        verify(operations).send(eq(""), eq("backend.shipment-events.dlq"), any(Message.class));
+    }
+
+    @Test
+    void oldSignatureStillUsesPaymentRoute() {
+        assertEquals(RetryRoute.PAYMENT_EVENTS.deadLetterQueue(), "backend.payment-events.dlq");
+        assertEquals("backend.payment-events.retry.2", RetryRoute.PAYMENT_EVENTS.retryQueue(2));
+    }
+
+    private String retryAfter(int retriesSoFar, RetryRoute route) {
+        org.mockito.Mockito.clearInvocations(operations);
+        retries.handleFailure(message(retriesSoFar), new RuntimeException("geçici"), true, route);
+        ArgumentCaptor<String> queue = ArgumentCaptor.forClass(String.class);
+        verify(operations).send(eq(""), queue.capture(), any(Message.class));
+        return queue.getValue();
+    }
+
     private String retryAfter(int retriesSoFar) {
         org.mockito.Mockito.clearInvocations(operations);
         retries.handleFailure(message(retriesSoFar), new RuntimeException("geçici"), true);

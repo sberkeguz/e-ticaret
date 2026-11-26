@@ -22,7 +22,13 @@ public class MessageRetries {
         this.rabbit = rabbit;
     }
 
+    /** Ödeme olayları rotası (backend.payment-events). */
     public void handleFailure(Message message, Exception failure, boolean retryable) {
+        handleFailure(message, failure, retryable, RetryRoute.PAYMENT_EVENTS);
+    }
+
+    /** Mesajı rotanın bir sonraki bekleme kuyruğuna ya da (tekrar hakkı bittiyse/kalıcı hataysa) DLQ'suna yazar. */
+    public void handleFailure(Message message, Exception failure, boolean retryable, RetryRoute route) {
         MessageProperties properties = message.getMessageProperties();
         int retriesSoFar = retriesSoFar(properties);
         properties.setHeader(ERROR, String.valueOf(failure.getMessage()));
@@ -32,12 +38,12 @@ public class MessageRetries {
             int next = retriesSoFar + 1;
             Duration delay = PaymentEventTopology.RETRY_DELAYS.get(retriesSoFar);
             properties.setHeader(RETRY_COUNT, next);
-            send(PaymentEventTopology.retryQueue(next), message);
+            send(route.retryQueue(next), message);
             log.info("Mesaj {} {} sonra tekrar denenecek ({}. tekrar): {}",
                     properties.getMessageId(), delay, next, failure.getMessage());
         } else {
             properties.setHeader("x-failed-at", Instant.now().toString());
-            send(PaymentEventTopology.DEAD_LETTER_QUEUE, message);
+            send(route.deadLetterQueue(), message);
             log.error("Mesaj {} DLQ'ya taşındı ({} tekrar sonra): {}",
                     properties.getMessageId(), retriesSoFar, failure.getMessage());
         }

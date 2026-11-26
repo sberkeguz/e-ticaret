@@ -1,6 +1,6 @@
 apiVersion: 1
 
-# Ödeme akışı uyarıları. Grafana > Alerting > Alert rules altında görünür (dakikada bir değerlendirilir).
+# Ödeme ve kargo akışı uyarıları. Grafana > Alerting > Alert rules altında görünür (dakikada bir değerlendirilir).
 # Bildirim kanalı (e-posta, Slack...) tanımlı değil: şimdilik yalnızca Grafana'da "Firing" olarak görünür.
 groups:
   - orgId: 1
@@ -210,3 +210,125 @@ groups:
               type: threshold
               expression: B
               conditions: [ { evaluator: { type: gt, params: [ 30 ] } } ]
+
+  # Kargo akışı uyarıları. Ölçümler backend'den gelir (shipment/ShipmentHealthMetrics, Micrometer → OTLP).
+  - orgId: 1
+    name: Kargo akışı
+    folder: E-ticaret
+    interval: 1m
+    rules:
+      - uid: eticaret-kargo-dlq
+        title: İşlenemeyen kargo olayı var (DLQ)
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Kargo servisinden gelen bir veya daha fazla gönderi olayı backend'de işlenemedi ve DLQ'da bekliyor (backend.shipment-events.dlq).
+          description: "Sipariş durumu kargodaki gerçek durumun gerisinde kalmış olabilir. RabbitMQ paneli (http://localhost:15672) > Queues > backend.shipment-events.dlq; neden için backend loglarına bakın."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(shipment_events_dead_letters{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      - uid: eticaret-kargo-komut-dlq
+        title: Kargo servisi gönderi isteğini reddetti (komut DLQ)
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: Backend'in gönderdiği bir veya daha fazla "kargoya ver" komutu kargo servisinde işlenemedi ve DLQ'da bekliyor (cargo.shipment-requests.dlq).
+          description: "Bu siparişler REQUESTED durumunda kalır, kargo açılmaz. RabbitMQ paneli > Queues > cargo.shipment-requests.dlq; neden için cargo-service loglarına bakın (docker compose logs cargo-service)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(shipment_commands_dead_letters{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      - uid: eticaret-kargo-takili
+        title: Kargoya verilen sipariş 30 dakikadır yanıt bekliyor
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: Bir veya daha fazla gönderi 30 dakikadan uzun süredir REQUESTED durumunda; kargo servisinden yanıt (shipment.created / shipment.failed) gelmedi.
+          description: "cargo-service ayakta mı (docker compose ps cargo-service), RabbitMQ'ya bağlı mı, cargo.shipment-requests kuyruğunda bekleyen mesaj var mı bakın. Ayrıntı: pgAdmin > order_shipments (status = REQUESTED)."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(shipment_requests_stuck{job="e-ticaret"})
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]
+
+      - uid: eticaret-kargo-siparis-celiskisi
+        title: Kargo olayı sipariş durumuyla çelişiyor
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: Son 10 dakikada, beklenmeyen durumdaki (ör. iptal edilmiş) bir sipariş için kargo olayı geldi. Gönderi kaydedildi, sipariş değiştirilmedi.
+          description: "Backend loglarında orderId ve durum yazar. Siparişi ve kargodaki gönderiyi admin panelinden elle kontrol edin; otomatik iade yoktur."
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(shipment_events_order_conflicts_total{job="e-ticaret"}[10m])) or vector(0)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [ { evaluator: { type: gt, params: [ 0 ] } } ]

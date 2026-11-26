@@ -34,8 +34,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * Kart verisi: 2D ödeme komutunun (ChargeRequested) payload'ı request.card alanında kartı şifresiz
  * içerir. Bu alan, mesaj RabbitMQ'ya iletilip yayın onayı gelene kadar outbox satırında durur; onay
- * gelince publishBatch aynı işlemde publishedAt'i yazar ve {@link #withoutCard} ile kartı satırdan
- * siler. Onay gelmezse kart satırda kalır ve mesaj tekrar denenir. Satırın kendisi gönderildikten
+ * gelince publishBatch aynı işlemde publishedAt'i yazar ve {@link #withoutSecrets} ile kartı satırdan
+ * siler. Kargo komutunun (ShipmentRequested) kökteki recipient alanı (alıcının adı, telefonu, adresi)
+ * da aynı şekilde yayın onayından sonra silinir. Onay gelmezse bu alanlar satırda kalır ve mesaj tekrar
+ * denenir. Satırın kendisi gönderildikten
  * KEEP_PUBLISHED (7 gün) sonra deleteOldPublished ile silinir. Payload hiçbir zaman loglanmaz.
  */
 @Component
@@ -60,11 +62,19 @@ public class OutboxRelay {
     /**
      * Mesajı çağıranın işleminde kaydeder; işlem kaydedilince hemen gönderilir. payload olduğu gibi
      * JSON'a yazılır: 2D ödeme komutunda kart şifresiz olarak satıra girer ve yayın onayından sonra
-     * publishBatch içinde withoutCard ile silinir.
+     * publishBatch içinde withoutSecrets ile silinir (kargo komutunun alıcı bilgisi de).
      */
     public void enqueue(String exchange, String routingKey, String type, Object payload) {
+        enqueue(UUID.randomUUID(), exchange, routingKey, type, payload);
+    }
+
+    /**
+     * Satır numarası verilen mesaj. Bu numara AMQP messageId olarak gider; gövdede de messageId taşıyan
+     * komutlar (ör. kargo komutu) ikisini aynı tutmak için bunu kullanır.
+     */
+    public void enqueue(UUID id, String exchange, String routingKey, String type, Object payload) {
         OutboxMessage message = new OutboxMessage();
-        message.setId(UUID.randomUUID());
+        message.setId(id);
         message.setExchange(exchange);
         message.setRoutingKey(routingKey);
         message.setType(type);
@@ -115,7 +125,7 @@ public class OutboxRelay {
                 return 0;
             }
             message.setPublishedAt(Instant.now());
-            message.setPayload(withoutCard(message.getPayload()));
+            message.setPayload(withoutSecrets(message.getPayload()));
         }
         if (!batch.isEmpty()) {
             log.info("{} mesaj RabbitMQ'ya gönderildi", batch.size());
@@ -123,7 +133,7 @@ public class OutboxRelay {
         return batch.size();
     }
 
-    private static Message toAmqp(OutboxMessage message) {
+    static Message toAmqp(OutboxMessage message) {
         MessageProperties properties = new MessageProperties();
         properties.setMessageId(message.getId().toString());
         properties.setType(message.getType());
@@ -133,14 +143,22 @@ public class OutboxRelay {
         return new Message(message.getPayload().getBytes(StandardCharsets.UTF_8), properties);
     }
 
-    /** İletilmiş mesajda kart bilgisi tutulmaz: request.card alanı silinir. */
-    String withoutCard(String payload) {
+    /**
+     * İletilmiş mesajda sır tutulmaz: ödeme komutunun kartı (request.card) ve kargo komutunun alıcı
+     * bilgisi (kökteki recipient: ad, telefon, adres) silinir. İkisi de yoksa payload aynen döner.
+     */
+    String withoutSecrets(String payload) {
         JsonNode root = json.readTree(payload);
+        boolean changed = false;
         if (root.get("request") instanceof ObjectNode request && request.has("card")) {
             request.remove("card");
-            return json.writeValueAsString(root);
+            changed = true;
         }
-        return payload;
+        if (root instanceof ObjectNode object && object.has("recipient")) {
+            object.remove("recipient");
+            changed = true;
+        }
+        return changed ? json.writeValueAsString(root) : payload;
     }
 
     /** Gönderilmiş mesajlar bir hafta sonra silinir. */

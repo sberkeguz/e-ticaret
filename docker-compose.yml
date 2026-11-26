@@ -8,11 +8,12 @@
         # Servis kullanıcılarının şifreleri (yalnızca ilk kurulumda kullanılır)
         BACKEND_DB_PASSWORD: ${BACKEND_DB_PASSWORD:-backend_dev_password}
         IYZICO_DB_PASSWORD: ${IYZICO_DB_PASSWORD:-iyzico_dev_password}
+        CARGO_DB_PASSWORD: ${CARGO_DB_PASSWORD:-cargo_dev_password}
       ports:
         - "5432:5432"
       volumes:
         - postgres_data:/var/lib/postgresql/data
-        # Boş veritabanı ilk açıldığında servis kullanıcılarını kurar (backend_app, iyzico_app)
+        # Boş veritabanı ilk açıldığında servis kullanıcılarını kurar (backend_app, iyzico_app, cargo_app)
         - ./docker/postgres/init/10-service-roles.sh:/docker-entrypoint-initdb.d/10-service-roles.sh:ro
         - ./docker/postgres/service-roles.sql:/docker-entrypoint-initdb.d/service-roles.sql.txt:ro
       healthcheck:
@@ -107,6 +108,40 @@
         interval: 5s
         timeout: 5s
         retries: 20
+
+    # Kargo servisi (.NET 10). Aynı Postgres, kendi şeması (cargo). Backend ile yalnızca RabbitMQ
+    # üzerinden konuşur (komut: cargo.shipment-requests, olaylar: cargo exchange'i).
+    cargo-service:
+      build:
+        context: ./services/cargo-service
+        dockerfile: Dockerfile
+      environment:
+        # Yalnızca cargo şemasına yetkili kullanıcı. Verilmezse servis açılmaz.
+        # GSS Encryption Mode=Disable: alpine imajında Kerberos kütüphanesi yok; Npgsql her bağlantıda
+        # denemesin ve loga "libgssapi_krb5.so.2" hatası düşmesin.
+        ConnectionStrings__Cargo: Host=postgres;Port=5432;Database=eticaret;Username=cargo_app;Password=${CARGO_DB_PASSWORD:-cargo_dev_password};GSS Encryption Mode=Disable
+        RabbitMq__Url: amqp://${RABBITMQ_USER:-eticaret}:${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}@rabbitmq:5672
+        # Zorunlu, varsayılanı yok. Şu an yalnızca sahte kargo firması (Fake) var.
+        Carrier__Provider: Fake
+        # Yerel geliştirme: sahte firmanın test uçları (/test/fake-carrier/...) X-Internal-Token ile açılır.
+        # Gerçek firma ya da canlı ortamda "false" olmalı.
+        Carrier__Fake__TestEndpointsEnabled: "true"
+        InternalApiToken: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
+      ports:
+        # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, sahte firma test uçları).
+        - "127.0.0.1:8082:8082"
+      depends_on:
+        postgres:
+          condition: service_healthy
+        rabbitmq:
+          condition: service_healthy
+      healthcheck:
+        # ready: veritabanına bağlanabiliyorsa 200 (RabbitMQ durumu etkilemez).
+        test: [ "CMD-SHELL", "wget -qO- http://localhost:8082/health/ready || exit 1" ]
+        interval: 5s
+        timeout: 5s
+        retries: 20
+        start_period: 15s
 
     backend:
       build:

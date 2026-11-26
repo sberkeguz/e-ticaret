@@ -43,6 +43,8 @@ public class SecurityConfig {
     private final UserRepository userRepository;
     // Her istekte token'ı kontrol eden filtremiz
     private final JwtAuthFilter jwtAuthFilter;
+    // Yetkisiz (giriş yapmış ama rolü yetmeyen) istekte ApiError JSON'u; CSRF reddini varsayılana bırakır.
+    private final ApiAccessDeniedHandler accessDeniedHandler;
 
     @Value("${auth.refresh-token-days:14}")
     private long refreshTokenDays;
@@ -98,6 +100,8 @@ public class SecurityConfig {
                         // Geri kalan her şey için giriş yapmış olmak yeterli
                         .anyRequest().authenticated()
                 )
+                // Girişsiz istek (authenticationEntryPoint) değişmedi; yalnız yetkisiz istek kodlu 403 alır.
+                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(accessDeniedHandler))
                 // Session tutma, her istek token ile doğrulanır
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // Bizim JWT filtremiz, Spring'in kendi login filtresinden ÖNCE çalışsın

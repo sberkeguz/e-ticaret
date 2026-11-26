@@ -10,6 +10,10 @@ import com.sarikaya.e_ticaret.payment.entity.Payment;
 import com.sarikaya.e_ticaret.payment.entity.PaymentStatus;
 import com.sarikaya.e_ticaret.payment.repository.PaymentRepository;
 import com.sarikaya.e_ticaret.payment.service.PaymentService;
+import com.sarikaya.e_ticaret.shipment.entity.OrderShipment;
+import com.sarikaya.e_ticaret.shipment.entity.ShipmentStatus;
+import com.sarikaya.e_ticaret.shipment.exception.ConflictException;
+import com.sarikaya.e_ticaret.shipment.repository.OrderShipmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,24 +32,32 @@ public class AdminOrderStatusService {
     private final PaymentService paymentService;
     private final OrderRepository orderRepository;
     private final PaymentRepository paymentRepository;
+    private final OrderShipmentRepository shipmentRepository;
 
     public AdminOrderStatusService(OrderService orderService,
                                    PaymentService paymentService,
                                    OrderRepository orderRepository,
-                                   PaymentRepository paymentRepository) {
+                                   PaymentRepository paymentRepository,
+                                   OrderShipmentRepository shipmentRepository) {
         this.orderService = orderService;
         this.paymentService = paymentService;
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
+        this.shipmentRepository = shipmentRepository;
     }
 
     /**
      * Admin'in sipariş durumu değişikliği. Tek işlemde çalışır ve önce ödeme satırını, sonra sipariş
-     * satırını kilitler (projedeki kilit sırası her yerde ödeme → sipariş: PaymentService.cancelByAdmin
-     * ve PaymentEventHandler da önce ödemeyi kilitler). Böylece aynı siparişe gelen eşzamanlı admin
+     * satırını, en son gönderi satırını kilitler (projedeki kilit sırası her yerde ödeme → sipariş →
+     * gönderi: PaymentService.cancelByAdmin, PaymentEventHandler, kargo işlemleri de bu sırayla kilitler). Böylece aynı siparişe gelen eşzamanlı admin
      * istekleri ve ödeme olayları sırayla işlenir; ikinci istek ilkinin sonucunu görerek karar verir.
      *
      * Kurallar:
+     *  - Siparişin FAILED olmayan bir gönderisi varsa (kargo istendi/yolda/teslim edildi) durumu elle
+     *    değiştirilemez: aynı durumu yeniden seçmek dışında her istek 409 ORDER_HAS_SHIPMENT. Böylece
+     *    kargoya istenmiş siparişin iptali (para iadesi + stok) kilit altında engellenir. Gönderi FAILED ise
+     *    (koli hiç çıkmadı) iptal serbesttir, elle SHIPPED/DELIVERED yine 409'dur. Gönderi yoksa aşağıdaki
+     *    kurallar aynen geçerlidir.
      *  - İptal edilmiş sipariş yeniden açılamaz.
      *  - Kargoya verilmiş (SHIPPED) ya da teslim edilmiş (DELIVERED) sipariş iptal edilemez; iptal parayı
      *    iade edip stoğu geri eklerdi.
@@ -62,6 +74,8 @@ public class AdminOrderStatusService {
         Optional<Payment> payment = paymentRepository.findByOrderIdForUpdate(orderId);
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı."));
+        Optional<OrderShipment> shipment = shipmentRepository.findByOrderIdForUpdate(orderId);
+        shipment.ifPresent(found -> requireChangeAllowedWithShipment(found, order.getStatus(), newStatus));
 
         boolean orderIsAlreadyCancelled = ORDER_CANCELLED.equals(order.getStatus());
         boolean adminWantsToCancel = ORDER_CANCELLED.equals(newStatus);
@@ -89,5 +103,16 @@ public class AdminOrderStatusService {
         }
 
         return orderService.updateStatus(orderId, newStatus);
+    }
+
+    private static void requireChangeAllowedWithShipment(OrderShipment shipment, OrderStatus current, OrderStatus requested) {
+        boolean failed = shipment.getStatus() == ShipmentStatus.FAILED;
+        boolean allowed = failed
+                ? !OUT_FOR_DELIVERY.contains(requested)
+                : requested == current;
+        if (!allowed) {
+            throw new ConflictException("ORDER_HAS_SHIPMENT",
+                    "Bu siparişin kargo kaydı var; durumu kargo firmasından güncellenir.");
+        }
     }
 }

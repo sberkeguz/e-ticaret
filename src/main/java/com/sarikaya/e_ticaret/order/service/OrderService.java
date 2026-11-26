@@ -97,6 +97,13 @@ public class OrderService {
 
     private static final int MAX_PAGE_SIZE = 100;
 
+    /** Tek sipariş (yönetici cevapları için); yoksa 404 "Sipariş bulunamadı.". */
+    @Transactional(readOnly = true)
+    public OrderResponse findOne(Long id) {
+        return toResponse(orders.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Sipariş bulunamadı.")));
+    }
+
     private OrderResponse toResponse(Order o) {
         return toResponse(o, false);
     }
@@ -108,7 +115,7 @@ public class OrderService {
                 o.getItems().stream()
                         .map(i -> new OrderResponse.Item(i.getProductId(), i.getProductName(), i.getPrice(), i.getQuantity()))
                         .toList(),
-                paymentProcessing);
+                paymentProcessing, null);
     }
 
 

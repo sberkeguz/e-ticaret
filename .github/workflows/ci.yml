@@ -1,4 +1,4 @@
-# Her push ve PR'da üç parçanın testleri ayrı ayrı (paralel) çalışır. Hiçbiri gerçek iyzico'ya,
+# Her push ve PR'da dört parçanın testleri ayrı ayrı (paralel) çalışır. Hiçbiri gerçek iyzico'ya,
 # geliştirme veritabanına ya da sırlara (secrets) ihtiyaç duymaz: veritabanı ve RabbitMQ testlerin
 # kendi açtığı geçici konteynerlerdir (Testcontainers), arayüz testleri sahte backend'le çalışır.
 name: CI
@@ -59,6 +59,42 @@ jobs:
         run: npm run typecheck
       - name: Testler (geçici PostgreSQL + RabbitMQ)
         run: npm test
+
+  cargo-service:
+    name: cargo-service (.NET)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/cargo-service
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: services/cargo-service/global.json
+          cache: true
+          cache-dependency-path: services/cargo-service/**/packages.lock.json
+      # packages.lock.json dışında bir sürüm çözülürse durur. NuGetAudit bilinen açıklı paketi
+      # uyarı olarak verir; TreatWarningsAsErrors (Directory.Build.props) bunu hataya çevirir.
+      - name: Bağımlılıklar (kilitli kip)
+        run: dotnet restore --locked-mode
+      - name: Bağımlılık taraması (bilinen açıklar, dolaylılar dahil)
+        run: |
+          # JSON çıktısı dilden bağımsızdır; açıklı paket varsa "vulnerabilities" alanı yazılır.
+          dotnet list package --vulnerable --include-transitive --no-restore --format json > vulnerable.json
+          cat vulnerable.json
+          if grep -q '"vulnerabilities"' vulnerable.json; then
+            echo "::error::Açıklı NuGet paketi var (yukarıdaki listeye bakın)"; exit 1
+          fi
+      - name: Derleme
+        run: dotnet build -c Release --no-restore
+      - name: Testler (geçici PostgreSQL + RabbitMQ)
+        run: dotnet test -c Release --no-build
+      - name: Docker imajı (compose'daki cargo-service ile aynı Dockerfile)
+        run: docker build -t e-ticaret-cargo:ci .
 
   frontend:
     name: Arayüz (React)

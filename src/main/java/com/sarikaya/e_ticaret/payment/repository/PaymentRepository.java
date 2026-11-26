@@ -39,4 +39,9 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             + "and p.status = com.sarikaya.e_ticaret.payment.entity.PaymentStatus.PENDING "
             + "and p.lastAttemptStatus = 'REQUESTED'")
     List<Long> findOrderIdsWithChargeInFlight(@Param("orderIds") java.util.Collection<Long> orderIds);
+
+    /** Verilen siparişlerden ödemesi bu durumda olanlar (listelerde toplu sorgu). */
+    @Query("select p.order.id from Payment p where p.order.id in :orderIds and p.status = :status")
+    List<Long> findOrderIdsWithStatus(@Param("orderIds") java.util.Collection<Long> orderIds,
+                                      @Param("status") PaymentStatus status);
 }

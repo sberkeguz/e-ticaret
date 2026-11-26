@@ -31,7 +31,8 @@ class AdminOrderStatusWithoutPaymentTest {
     private final OrderRepository orderRepository = mock(OrderRepository.class);
     private final PaymentRepository paymentRepository = mock(PaymentRepository.class);
     private final AdminOrderStatusService service = new AdminOrderStatusService(
-            orderService, mock(PaymentService.class), orderRepository, paymentRepository);
+            orderService, mock(PaymentService.class), orderRepository, paymentRepository,
+            mock(com.sarikaya.e_ticaret.shipment.repository.OrderShipmentRepository.class));
 
     /** KIRMIZI: ödenmemiş durumdaki, ödeme kaydı olmayan sipariş admin eliyle "satılmış" duruma geçebiliyor. */
     @ParameterizedTest(name = "{0} -> {1} reddedilmeli")

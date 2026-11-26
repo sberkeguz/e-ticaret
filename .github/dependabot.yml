@@ -30,8 +30,15 @@ updates:
       - dependency-name: typescript
         update-types: [version-update:semver-major]
 
+  # cargo-service: Directory.Packages.props (merkezi sürümler) + packages.lock.json.
+  - package-ecosystem: nuget
+    directory: /services/cargo-service
+    schedule: { interval: weekly }
+    groups:
+      minor-and-patch: { update-types: [minor, patch] }
+
   - package-ecosystem: docker
-    directories: [/, /admin-panel, /services/iyzico-service]
+    directories: [/, /admin-panel, /services/iyzico-service, /services/cargo-service]
     schedule: { interval: weekly }
 
   - package-ecosystem: github-actions

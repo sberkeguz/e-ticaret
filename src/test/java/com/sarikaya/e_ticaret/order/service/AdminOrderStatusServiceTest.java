@@ -30,7 +30,8 @@ class AdminOrderStatusServiceTest {
     private final PaymentRepository paymentRepository = mock(PaymentRepository.class);
 
     private final AdminOrderStatusService service =
-            new AdminOrderStatusService(orderService, paymentService, orderRepository, paymentRepository);
+            new AdminOrderStatusService(orderService, paymentService, orderRepository, paymentRepository,
+                    mock(com.sarikaya.e_ticaret.shipment.repository.OrderShipmentRepository.class));
 
     private Order order;
 
