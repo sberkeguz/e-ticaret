@@ -8,9 +8,10 @@
         # Servis kullanıcılarının şifreleri (yalnızca ilk kurulumda kullanılır)
         BACKEND_DB_PASSWORD: ${BACKEND_DB_PASSWORD:-backend_dev_password}
         IYZICO_DB_PASSWORD: ${IYZICO_DB_PASSWORD:-iyzico_dev_password}
-        CARGO_DB_PASSWORD: ${CARGO_DB_PASSWORD:-cargo_dev_password}
+        CARGO_DB_PASSWORD: ${CARGO_DB_PASSWORD:?CARGO_DB_PASSWORD .env dosyasinda tanimli olmali}
       ports:
-        - "5432:5432"
+        # Yalnızca bu bilgisayardan erişilir (pgAdmin/IDE). Servisler Docker ağı üzerinden bağlanır.
+        - "127.0.0.1:5432:5432"
       volumes:
         - postgres_data:/var/lib/postgresql/data
         # Boş veritabanı ilk açıldığında servis kullanıcılarını kurar (backend_app, iyzico_app, cargo_app)
@@ -71,6 +72,24 @@
         timeout: 10s
         retries: 20
 
+    # Tek seferlik kurulum: cargo-service'in kendi RabbitMQ kullanıcısı (RABBITMQ_CARGO_USER) ve dar izinleri.
+    # Yönetim HTTP API'si ile yapılır (definitions dosyası RABBITMQ_DEFAULT_USER'ı devre dışı bırakırdı).
+    # Her "up"ta yeniden çalışır ve aynı sonucu verir; şifre değişirse günceller. İzinler betiğin başında.
+    rabbitmq-init:
+      image: curlimages/curl:8.17.0@sha256:935d9100e9ba842cdb060de42472c7ca90cfe9a7c96e4dacb55e79e560b3ff40
+      entrypoint: [ "/bin/sh", "/init/init-cargo-user.sh" ]
+      environment:
+        RABBITMQ_ADMIN_USER: ${RABBITMQ_USER:-eticaret}
+        RABBITMQ_ADMIN_PASSWORD: ${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}
+        CARGO_USER: ${RABBITMQ_CARGO_USER:-cargo}
+        CARGO_PASSWORD: ${RABBITMQ_CARGO_PASSWORD:?RABBITMQ_CARGO_PASSWORD .env dosyasinda tanimli olmali}
+      volumes:
+        - ./docker/rabbitmq/init-cargo-user.sh:/init/init-cargo-user.sh:ro
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
+      restart: "no"
+
     # iyzico ile konuşan tek servis (NestJS + Prisma). Aynı Postgres, kendi şeması (iyzico).
     iyzico-service:
       build:
@@ -119,14 +138,18 @@
         # Yalnızca cargo şemasına yetkili kullanıcı. Verilmezse servis açılmaz.
         # GSS Encryption Mode=Disable: alpine imajında Kerberos kütüphanesi yok; Npgsql her bağlantıda
         # denemesin ve loga "libgssapi_krb5.so.2" hatası düşmesin.
-        ConnectionStrings__Cargo: Host=postgres;Port=5432;Database=eticaret;Username=cargo_app;Password=${CARGO_DB_PASSWORD:-cargo_dev_password};GSS Encryption Mode=Disable
-        RabbitMq__Url: amqp://${RABBITMQ_USER:-eticaret}:${RABBITMQ_PASSWORD:-eticaret_dev_rabbit}@rabbitmq:5672
+        ConnectionStrings__Cargo: Host=postgres;Port=5432;Database=eticaret;Username=cargo_app;Password=${CARGO_DB_PASSWORD:?CARGO_DB_PASSWORD .env dosyasinda tanimli olmali};GSS Encryption Mode=Disable
+        # Kendi kullanıcısı (rabbitmq-init kurar): yalnız cargo.* kaynakları, "cargo" exchange'ine yalnız shipment.* yayını.
+        RabbitMq__Url: amqp://${RABBITMQ_CARGO_USER:-cargo}:${RABBITMQ_CARGO_PASSWORD:?RABBITMQ_CARGO_PASSWORD .env dosyasinda tanimli olmali}@rabbitmq:5672
         # Zorunlu, varsayılanı yok. Şu an yalnızca sahte kargo firması (Fake) var.
         Carrier__Provider: Fake
         # Yerel geliştirme: sahte firmanın test uçları (/test/fake-carrier/...) X-Internal-Token ile açılır.
-        # Gerçek firma ya da canlı ortamda "false" olmalı.
+        # Gerçek firma ya da canlı ortamda "false" olmalı. Production ortamında "true" verilirse servis açılmaz;
+        # bu compose dosyası yalnız yerel geliştirme içindir, bu yüzden ortam Development.
+        ASPNETCORE_ENVIRONMENT: Development
         Carrier__Fake__TestEndpointsEnabled: "true"
-        InternalApiToken: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN .env dosyasinda tanimli olmali}
+        # Yalnız bu servisin sırrı (iyzico ile ortak INTERNAL_API_TOKEN'dan ayrı). Backend bu servisi HTTP ile çağırmaz.
+        InternalApiToken: ${CARGO_INTERNAL_TOKEN:?CARGO_INTERNAL_TOKEN .env dosyasinda tanimli olmali}
       ports:
         # Yalnızca bu bilgisayardan erişilir (yerel geliştirme, sahte firma test uçları).
         - "127.0.0.1:8082:8082"
@@ -135,6 +158,8 @@
           condition: service_healthy
         rabbitmq:
           condition: service_healthy
+        rabbitmq-init:
+          condition: service_completed_successfully
       healthcheck:
         # ready: veritabanına bağlanabiliyorsa 200 (RabbitMQ durumu etkilemez).
         test: [ "CMD-SHELL", "wget -qO- http://localhost:8082/health/ready || exit 1" ]

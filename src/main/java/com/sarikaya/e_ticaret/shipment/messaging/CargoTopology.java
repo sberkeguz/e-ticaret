@@ -5,6 +5,7 @@ import com.sarikaya.e_ticaret.payment.events.RetryRoute;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Declarables;
+import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.ExchangeBuilder;
 import org.springframework.amqp.core.FanoutExchange;
 import org.springframework.amqp.core.Queue;
@@ -35,6 +36,14 @@ public class CargoTopology {
     public static final String SHIPMENT_REQUESTS_QUEUE = "cargo.shipment-requests";
     public static final String SHIPMENT_REQUESTS_DEAD_LETTER_QUEUE = SHIPMENT_REQUESTS_QUEUE + ".dlq";
 
+    /**
+     * Komut kuyruğunun adlı dead-letter exchange'i (direct, durable). Varsayılan exchange ("") kullanılmaz:
+     * cargo kullanıcısının "" üzerinde yazma izni olsaydı her kuyruğa (ör. iyzico.charge-requests) mesaj bırakabilirdi.
+     */
+    public static final String SHIPMENT_REQUESTS_DEAD_LETTER_EXCHANGE = "cargo.dlx";
+    /** cargo-service'in tanınmayan hatada sayaçlı kopyayı komut kuyruğuna geri yayınladığı exchange (direct, durable). */
+    public static final String SHIPMENT_REQUESTS_RETRY_EXCHANGE = "cargo.retry";
+
     /** Backend'in gönderi olayı kuyruğu; tekrar deneme ve DLQ adları buradan türer. */
     public static final String EVENTS_QUEUE = "backend.shipment-events";
     public static final RetryRoute EVENTS_ROUTE = new RetryRoute(EVENTS_QUEUE);
@@ -46,10 +55,12 @@ public class CargoTopology {
         FanoutExchange unrouted = ExchangeBuilder.fanoutExchange(UNROUTED_EXCHANGE).durable(true).build();
         Queue unroutedQueue = QueueBuilder.durable(UNROUTED_QUEUE).build();
         TopicExchange cargo = ExchangeBuilder.topicExchange(EXCHANGE).durable(true).alternate(UNROUTED_EXCHANGE).build();
+        DirectExchange requestsDlx = ExchangeBuilder.directExchange(SHIPMENT_REQUESTS_DEAD_LETTER_EXCHANGE).durable(true).build();
+        DirectExchange requestsRetry = ExchangeBuilder.directExchange(SHIPMENT_REQUESTS_RETRY_EXCHANGE).durable(true).build();
         Queue requestsDeadLetters = QueueBuilder.durable(SHIPMENT_REQUESTS_DEAD_LETTER_QUEUE).build();
-        // Yalnız bu iki argüman: x-dead-letter-exchange "" ve x-dead-letter-routing-key "...dlq".
+        // Yalnız bu iki argüman: x-dead-letter-exchange "cargo.dlx" ve x-dead-letter-routing-key "...dlq".
         Queue requests = QueueBuilder.durable(SHIPMENT_REQUESTS_QUEUE)
-                .deadLetterExchange("")
+                .deadLetterExchange(SHIPMENT_REQUESTS_DEAD_LETTER_EXCHANGE)
                 .deadLetterRoutingKey(SHIPMENT_REQUESTS_DEAD_LETTER_QUEUE)
                 .build();
 
@@ -62,8 +73,11 @@ public class CargoTopology {
 
         List<Declarable> all = new ArrayList<>(List.of(
                 unrouted, unroutedQueue, BindingBuilder.bind(unroutedQueue).to(unrouted),
-                cargo, requestsDeadLetters, requests,
+                cargo, requestsDlx, requestsRetry, requestsDeadLetters,
+                BindingBuilder.bind(requestsDeadLetters).to(requestsDlx).with(SHIPMENT_REQUESTS_DEAD_LETTER_QUEUE),
+                requests,
                 BindingBuilder.bind(requests).to(cargo).with(SHIPMENT_CREATE_ROUTING_KEY),
+                BindingBuilder.bind(requests).to(requestsRetry).with(SHIPMENT_REQUESTS_QUEUE),
                 events, eventDeadLetters,
                 BindingBuilder.bind(events).to(cargo).with("shipment.#")));
 

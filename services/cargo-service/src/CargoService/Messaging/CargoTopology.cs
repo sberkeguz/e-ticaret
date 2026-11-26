@@ -35,6 +35,19 @@ public static class CargoTopology
     /// <summary>Reddedilen (bozuk) komutların düştüğü kuyruk; durable, argümansız. Bu servis tanımlar.</summary>
     public const string ShipmentRequestsDeadLetterQueue = ShipmentRequestsQueue + ".dlq";
 
+    /// <summary>
+    /// Direct, durable. <see cref="ShipmentRequestsQueue"/>'nun dead-letter exchange'i; yalnız
+    /// <see cref="ShipmentRequestsDeadLetterQueue"/> bağlıdır (anahtar = DLQ adı). Varsayılan exchange ("")
+    /// kullanılmaz: cargo kullanıcısının "" üzerinde yazma izni olsaydı her kuyruğa mesaj bırakabilirdi.
+    /// </summary>
+    public const string DeadLetterExchange = "cargo.dlx";
+
+    /// <summary>
+    /// Direct, durable. Tanınmayan hatada sayaçlı kopyanın komut kuyruğuna geri yayınlandığı exchange; yalnız
+    /// <see cref="ShipmentRequestsQueue"/> bağlıdır (anahtar = kuyruk adı).
+    /// </summary>
+    public const string RetryExchange = "cargo.retry";
+
     /// <summary>Her olayda AMQP başlığı <c>x-event-version</c> olarak gider.</summary>
     public const int EventVersion = 1;
 
@@ -48,13 +61,13 @@ public static class CargoTopology
 
     /// <summary>
     /// <see cref="ShipmentRequestsQueue"/> argümanları — backend ile birebir aynı olmalıdır:
-    /// <c>x-dead-letter-exchange = ""</c> (varsayılan exchange) ve
+    /// <c>x-dead-letter-exchange = "cargo.dlx"</c> (<see cref="DeadLetterExchange"/>) ve
     /// <c>x-dead-letter-routing-key = "cargo.shipment-requests.dlq"</c>. Reddedilen mesaj böylece
-    /// doğrudan DLQ kuyruğuna gider.
+    /// DLX'teki tek bağ üzerinden DLQ kuyruğuna gider.
     /// </summary>
     public static IDictionary<string, object?> ShipmentRequestsQueueArguments => new Dictionary<string, object?>
     {
-        ["x-dead-letter-exchange"] = "",
+        ["x-dead-letter-exchange"] = DeadLetterExchange,
         ["x-dead-letter-routing-key"] = ShipmentRequestsDeadLetterQueue,
     };
 
@@ -68,9 +81,14 @@ public static class CargoTopology
         await channel.ExchangeDeclareAsync(Exchange, ExchangeType.Topic, durable: true, autoDelete: false,
             arguments: new Dictionary<string, object?> { ["alternate-exchange"] = UnroutedExchange }, cancellationToken: ct);
 
+        await channel.ExchangeDeclareAsync(DeadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false, cancellationToken: ct);
+        await channel.ExchangeDeclareAsync(RetryExchange, ExchangeType.Direct, durable: true, autoDelete: false, cancellationToken: ct);
+
         await channel.QueueDeclareAsync(ShipmentRequestsDeadLetterQueue, durable: true, exclusive: false, autoDelete: false, cancellationToken: ct);
+        await channel.QueueBindAsync(ShipmentRequestsDeadLetterQueue, DeadLetterExchange, ShipmentRequestsDeadLetterQueue, cancellationToken: ct);
         await channel.QueueDeclareAsync(ShipmentRequestsQueue, durable: true, exclusive: false, autoDelete: false,
             arguments: ShipmentRequestsQueueArguments, cancellationToken: ct);
         await channel.QueueBindAsync(ShipmentRequestsQueue, Exchange, ShipmentCreateRoutingKey, cancellationToken: ct);
+        await channel.QueueBindAsync(ShipmentRequestsQueue, RetryExchange, ShipmentRequestsQueue, cancellationToken: ct);
     }
 }

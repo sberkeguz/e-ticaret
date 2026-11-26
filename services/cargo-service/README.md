@@ -41,10 +41,11 @@ docker build -t cargo-service .
 | `Workers__PollInterval` | Varsayılan `00:05:00`: firmadan takip durumu sorgulama aralığı. |
 | `Workers__CleanupInterval` | Varsayılan `1.00:00:00`: temizlik işinin aralığı. |
 | `Workers__UndeliveredRecipientRetention` | Varsayılan `90.00:00:00` (sıfırdan büyük olmalı): FAILED ve DELIVERY_FAILED gönderide son değişiklikten bu kadar sonra alıcı bilgisi silinir; DELIVERY_FAILED gönderi bu süreden sonra firmadan sorgulanmaz. |
-| `Carrier__Provider` | **Zorunlu, varsayılanı yok.** Şu an yalnızca `Fake` (sahte firma) var. Boşsa ya da birebir `Fake` değilse (`fake`, ` Fake`, `Fakee` dahil) servis açılışta doğrulama hatasıyla durur. |
+| `Workers__StaleRecipientRetention` | Varsayılan `180.00:00:00` (sıfırdan büyük olmalı): üst sınır; durum ne olursa olsun (takılı REQUESTED/SENDING/CREATED/IN_TRANSIT dahil) son değişiklikten bu kadar sonra alıcı bilgisi silinir. SENDING'de süre `sending_since`'tan ölçülür. |
+| `Carrier__Provider` | **Zorunlu, varsayılanı yok.** Şu an yalnızca `Fake` (sahte firma) var. Boşsa ya da birebir `Fake` değilse (`fake`, ` Fake`, `Fakee` dahil) servis açılışta doğrulama hatasıyla durur. Production ortamında `Fake` seçiliyse servis açılır ama her açılışta uyarı loglanır (gerçek firma bağlantısı eklenene kadar). |
 | `Carrier__Fake__DelayMs` | Sahte firmanın her çağrıdan önceki beklemesi (ms). |
 | `Carrier__Fake__FailMode`, `Carrier__Fake__FailTimes` | Açılıştaki hata planı: `None`, `TimeoutBeforeCreate`, `TimeoutAfterCreate`, `Permanent`; kaç gönderi açma çağrısına uygulanacağı. |
-| `Carrier__Fake__TestEndpointsEnabled` | Varsayılan `false`. `true` ve `InternalApiToken` doluysa (ve Provider=Fake) test uçları açılır. |
+| `Carrier__Fake__TestEndpointsEnabled` | Varsayılan `false`. `true` ve `InternalApiToken` doluysa (ve Provider=Fake) test uçları açılır. Production ortamında (`ASPNETCORE_ENVIRONMENT=Production`) `true` verilirse servis açılış doğrulamasında durur. |
 | `InternalApiToken` | İç uçların sırrı (`X-Internal-Token`). Boşsa test uçları hiç eşlenmez. Loglanmaz. |
 
 Port: `8082` (`ASPNETCORE_HTTP_PORTS`).
@@ -62,8 +63,13 @@ Tanımlar `src/CargoService/Messaging/CargoTopology.cs` içindedir; backend ayn�
 - Exchange `cargo` (topic, durable, `alternate-exchange=cargo.unrouted`); `cargo.unrouted` fanout +
   aynı adlı durable kuyruk (yönlendirilemeyen mesaj kaybolmaz).
 - Komut `commands.shipment.create` → kuyruk `cargo.shipment-requests` (durable,
-  `x-dead-letter-exchange=""`, `x-dead-letter-routing-key=cargo.shipment-requests.dlq`); DLQ
-  `cargo.shipment-requests.dlq`. Bozuk/eksik alanlı ya da yasak karakterli (U+0000, kontrol karakteri, eşsiz
+  `x-dead-letter-exchange=cargo.dlx`, `x-dead-letter-routing-key=cargo.shipment-requests.dlq`); DLQ
+  `cargo.shipment-requests.dlq` (argümansız), `cargo.dlx`'e (direct, durable) aynı adlı anahtarla bağlıdır.
+  `cargo.retry` (direct, durable) yalnız `cargo.shipment-requests`'e (anahtar = kuyruk adı) bağlıdır; tanınmayan
+  hatadaki yeniden yayın buradan, `mandatory` ile yapılır (yönlenemezse asıl mesaj kuyruğa geri konur).
+  Servisin RabbitMQ kullanıcısının varsayılan exchange'e (`""`) yazma izni yoktur (`docker/rabbitmq/init-cargo-user.sh`).
+  Eski argümanlı (`x-dead-letter-exchange=""`) kuyruktan geçiş için kök README'deki *Geçiş* adımlarına bakın.
+  Bozuk/eksik alanlı ya da yasak karakterli (U+0000, kontrol karakteri, eşsiz
   vekil, U+FFFD) komut DLQ'ya gider. İşleme hatasında: geçici hata (bağlantı, zaman aşımı, 40001, 40P01)
   → 5 sn sonra kuyruğa geri konur, deneme sınırı yok; kalıcı veri hatası (SqlState sınıf 22/23) → DLQ;
   tanınmayan hata → 5 sn sonra kopyası `x-cargo-attempts` başlığı artırılarak yeniden yayınlanır,
@@ -71,6 +77,8 @@ Tanımlar `src/CargoService/Messaging/CargoTopology.cs` içindedir; backend ayn�
   DLQ'daki bir komut sorun giderildikten sonra elle `cargo.shipment-requests`'e geri taşınırken
   **`x-cargo-attempts` başlığı silinmelidir**; silinmezse sayaç sınırda kalır (başlık en fazla 5 sayılır)
   ve komut ilk tanınmayan hatada yeniden DLQ'ya düşer.
+- **DLQ'daki kişisel veri.** DLQ'daki komutlar alıcının adını, telefonunu ve adresini taşır ve kendiliğinden
+  silinmez (kuyruk tanımında TTL yoktur). Temizlik işi yalnızca veritabanını temizler; DLQ elle boşaltılır (aşağıda).
 - Olaylar: `shipment.created`, `shipment.in_transit`, `shipment.delivered`, `shipment.delivery_failed`,
   `shipment.failed` (ret de `shipment.failed`, `data.status=REJECTED`). AMQP messageId = outbox satır id,
   persistent, başlıklar `x-event-version: 1` ve `traceparent`. Olaylar kişisel veri içermez; `sequence`
@@ -78,6 +86,28 @@ Tanımlar `src/CargoService/Messaging/CargoTopology.cs` içindedir; backend ayn�
 - Yayın outbox üzerinden yapılır: satır yalnızca publisher confirm gelince `published_at` alır; RabbitMQ
   kapalıyken satırlar bekler (`attempts`/`last_error` güncellenir), bağlantı gelince gider. En az bir kez
   teslim: dinleyiciler messageId ile tekrarı ayıklar.
+
+### DLQ'yu elle boşaltma
+
+DLQ argümanları (`cargo.shipment-requests` üzerindeki `x-dead-letter-*`) **değiştirilmez** ve kuyruklar
+silinip farklı argümanlarla yeniden tanımlanmaz: backend aynı kuyrukları aynı argümanlarla tanımlar; fark
+olursa iki taraf da `PRECONDITION_FAILED` ile bağlanamaz (tek istisna, iki tarafın birlikte değiştiği sürüm
+geçişidir; kök README'deki *Geçiş* adımları). Bu yüzden saklama süresi kuyruk argümanıyla değil,
+elle yapılan bu prosedürle sağlanır. DLQ'ya mesaj düştüğünde (ve en geç
+`Workers__StaleRecipientRetention` süresi içinde):
+
+1. **İncele.** RabbitMQ yönetim arayüzü → Queues → `cargo.shipment-requests.dlq` → *Get messages*,
+   *Ack mode: Nack message requeue true* (mesaj kuyrukta kalır). Gövdeyi ya da alıcı bilgisini bilet, sohbet
+   veya loga kopyalama; nedeni anlamak için `messageId`, `orderId`, `requestNo` ve servis loglarındaki
+   ret nedeni yeterlidir.
+2. **Karar ver.** Sorun giderildiyse ve sipariş hâlâ gönderilecekse komutu `cargo.shipment-requests`'e geri
+   taşı (`x-cargo-attempts` başlığını sil, yukarıya bak). Gönderilmeyecekse ya da backend aynı sipariş için
+   "Tekrar dene" ile yeni bir komut (daha büyük `requestNo`) üretebiliyorsa mesaj atılır.
+3. **Boşalt.** Kuyruğun tamamı atılacaksa:
+   `rabbitmqctl purge_queue cargo.shipment-requests.dlq` (vhost farklıysa `-p <vhost>`), ya da yönetim
+   arayüzünde *Purge Messages*. Tek bir mesajı atmak için *Get messages* ile *Ack mode: Automatic ack*
+   kullanılır (kuyruğun başındaki mesajı alır ve siler; önce 1. adımla sırayı doğrula).
+4. **Doğrula.** Kuyruk ekranında *Ready* ve *Unacked* sayılarının beklenen değere indiğini kontrol et.
 
 ## Gönderi işleri
 
@@ -97,7 +127,12 @@ firmada tekrar anahtarıyla (`idempotency_key`) aranır. Böylece firmada sipari
   uyarı loglanır. Her geçiş aynı işlemde olay yazar (`sequence+1`).
 - **Temizlik** (`Cleanup`): 14 günden eski `processed_messages`, yayını 7 günden eski outbox satırları
   silinir (yayınlanmamış olay silinmez); teslimden 30 gün sonra, FAILED/DELIVERY_FAILED gönderide son değişiklikten
-  90 gün sonra (`Workers__UndeliveredRecipientRetention`) `shipments.recipient` NULL yapılır.
+  90 gün sonra (`Workers__UndeliveredRecipientRetention`) `shipments.recipient` NULL yapılır. Üst sınır:
+  durum ne olursa olsun (takılı REQUESTED/SENDING/CREATED/IN_TRANSIT dahil) son değişiklikten 180 gün
+  sonra (`Workers__StaleRecipientRetention`; SENDING'de `sending_since`'tan) alıcı bilgisi silinir. Durum
+  değiştirilmez: alıcısı olmayan REQUESTED gönderiyi worker, firmada bulunamayan SENDING gönderiyi
+  uzlaştırıcı firmayı çağırmadan FAILED yapar ve `shipment.failed` yazar; uzlaştırıcı gönderiyi firmada
+  bulursa CREATED olur. CREATED/IN_TRANSIT gönderinin takibi alıcı bilgisi olmadan sürer.
 
 Birden fazla servis kopyası aynı anda çalışabilir (satır kilitleri ve koşullu güncellemeler çift işlemeyi
 önler); temizlik tekrarlanması zararsız ifadelerden oluşur.
@@ -113,7 +148,8 @@ Birden fazla servis kopyası aynı anda çalışabilir (satır kilitleri ve koş
 ## Sahte kargo firması test uçları
 
 Yalnızca `Carrier:Provider=Fake`, `Carrier:Fake:TestEndpointsEnabled=true` ve `InternalApiToken` dolu
-iken vardır (aksi hâlde 404). `X-Internal-Token` yoksa/yanlışsa 401.
+iken vardır (aksi hâlde 404). `X-Internal-Token` yoksa/yanlışsa 401. Production ortamında
+`TestEndpointsEnabled=true` ise servis hiç açılmaz.
 
 - `POST /test/fake-carrier/shipments/{trackingNo}/status` — `{ "status": "IN_TRANSIT" | "DELIVERED" | "DELIVERY_FAILED" }` → 204 (takip no yoksa 404).
   Ardından o gönderi periyodik turu beklemeden hemen sorgulanır (`Workers__Enabled`'dan bağımsız); 204 sorgu bitince döner.

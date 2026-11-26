@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine@sha256:0294f285d062afacc8b5f6d7febb0cd4ee879320e5585fa15f2f4ebf1feb9ba7 AS build
 WORKDIR /src
 
 # Önce yalnızca proje/sürüm/kilit dosyaları: kaynak değişince restore katmanı önbellekten gelir.
@@ -10,7 +10,7 @@ RUN dotnet restore src/CargoService/CargoService.csproj --locked-mode
 COPY src ./src
 RUN dotnet publish src/CargoService/CargoService.csproj -c Release --no-restore -o /app -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine@sha256:21c3f9798416cba4c0576a947c286231cb71ea2884896cb968253f5c9668f930
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8082 \
     DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1

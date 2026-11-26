@@ -33,7 +33,10 @@ public sealed class CargoOptions
     /// </summary>
     public string? InternalApiToken { get; set; }
 
-    /// <summary>Ayarları yapılandırmadan okur; bağlantı dizesini ve kargo firması sağlayıcısını açılışta (ValidateOnStart) doğrular.</summary>
+    /// <summary>
+    /// Ayarları yapılandırmadan okur; açılışta (ValidateOnStart) doğrular: bağlantı dizesi, kargo firması
+    /// sağlayıcısı, saklama süreleri (&gt; 0) ve Production ortamında sahte firma test uçlarının kapalı olması.
+    /// </summary>
     public static void Register(IServiceCollection services)
     {
         services.AddOptions<CargoOptions>()
@@ -57,6 +60,13 @@ public sealed class CargoOptions
             .Validate(
                 options => options.Workers.UndeliveredRecipientRetention > TimeSpan.Zero,
                 "Workers:UndeliveredRecipientRetention sıfırdan büyük olmalıdır.")
+            .Validate(
+                options => options.Workers.StaleRecipientRetention > TimeSpan.Zero,
+                "Workers:StaleRecipientRetention sıfırdan büyük olmalıdır.")
+            .Validate<IHostEnvironment>(
+                (options, environment) => !(environment.IsProduction() && options.Carrier.Fake.TestEndpointsEnabled),
+                "Carrier:Fake:TestEndpointsEnabled Production ortamında açık olamaz (ortam değişkeni: " +
+                "Carrier__Fake__TestEndpointsEnabled). Sahte kargo firmasının test uçları yalnızca test ortamı içindir.")
             .ValidateOnStart();
     }
 
@@ -115,7 +125,7 @@ public sealed class FakeCarrierSettings
 
     /// <summary>
     /// true ise /test/fake-carrier/* uçları eşlenir — yalnızca Provider=Fake ve InternalApiToken dolu
-    /// iken. Varsayılan kapalı.
+    /// iken. Varsayılan kapalı. Production ortamında true verilirse servis açılış doğrulamasında durur.
     /// </summary>
     public bool TestEndpointsEnabled { get; set; }
 }
@@ -181,6 +191,15 @@ public sealed class WorkerSettings
     /// olayları silinmez.
     /// </summary>
     public TimeSpan UndeliveredRecipientRetention { get; set; } = TimeSpan.FromDays(90);
+
+    /// <summary>
+    /// Üst sınır: durumu ne olursa olsun (REQUESTED, SENDING, CREATED, IN_TRANSIT dahil takılı kalanlar)
+    /// gönderinin son değişikliğinden bu kadar süre sonra alıcı bilgisi silinir (varsayılan 180 gün; sıfırdan
+    /// büyük olmalıdır). SENDING'de süre belirsizliğin başladığı andan (<c>sending_since</c>) ölçülür, çünkü
+    /// uzlaştırıcı her denemede <c>updated_at</c>'i yeniler. Alıcısı silinen REQUESTED/SENDING gönderi firmaya
+    /// gönderilmez; mevcut akışla FAILED olur ve shipment.failed yazılır (bkz. <see cref="Shipping.Cleanup"/>).
+    /// </summary>
+    public TimeSpan StaleRecipientRetention { get; set; } = TimeSpan.FromDays(180);
 
     /// <summary>
     /// Outbox yayıncısının yedek tur aralığı: commit sonrası sinyal kaçsa bile olay en geç bu sürede gider.

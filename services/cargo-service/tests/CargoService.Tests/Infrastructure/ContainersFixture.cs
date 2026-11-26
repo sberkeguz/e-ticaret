@@ -1,3 +1,5 @@
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Networks;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
@@ -22,7 +24,27 @@ public sealed class ContainersFixture : IAsyncLifetime
         .WithPassword("eticaret_test_password")
         .Build();
 
-    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4-management-alpine").Build();
+    // RabbitMQ'nun cargo kullanıcısı: depodaki docker/rabbitmq/init-cargo-user.sh ile kurulur.
+    public const string RabbitCargoUser = "cargo";
+    private const string RabbitCargoPassword = "cargo_rabbit_test_password";
+    private const string RabbitAdminUser = "rabbitmq";
+    private const string RabbitAdminPassword = "rabbitmq";
+    private const string RabbitAlias = "rabbitmq";
+
+    // Betik compose'daki gibi ayrı bir curl kapsayıcısında, RabbitMQ ile aynı (geçici) ağda çalışır.
+    private readonly INetwork _network = new NetworkBuilder().Build();
+
+    private readonly RabbitMqContainer _rabbit;
+
+    public ContainersFixture()
+    {
+        _rabbit = new RabbitMqBuilder("rabbitmq:4-management-alpine")
+            .WithUsername(RabbitAdminUser)
+            .WithPassword(RabbitAdminPassword)
+            .WithNetwork(_network)
+            .WithNetworkAliases(RabbitAlias)
+            .Build();
+    }
 
     /// <summary>Süper kullanıcı bağlantısı: yalnızca test hazırlığı (ör. public'te tablo açmak) için.</summary>
     public string AdminConnectionString => _postgres.GetConnectionString();
@@ -34,7 +56,15 @@ public sealed class ContainersFixture : IAsyncLifetime
         Password = CargoPassword,
     }.ConnectionString;
 
+    /// <summary>Yönetici bağlantısı: yalnızca test hazırlığı ve doğrulama için.</summary>
     public string RabbitMqUrl => _rabbit.GetConnectionString();
+
+    /// <summary>Servisin kullandığı bağlantı: init-cargo-user.sh'nin dar izinli cargo kullanıcısı.</summary>
+    public string CargoRabbitMqUrl => new UriBuilder(RabbitMqUrl)
+    {
+        UserName = RabbitCargoUser,
+        Password = RabbitCargoPassword,
+    }.Uri.ToString();
 
     /// <summary>
     /// RabbitMQ'daki bütün istemci bağlantılarını sunucu tarafında kapatır (ağ kesintisi benzetimi).
@@ -51,19 +81,47 @@ public sealed class ContainersFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        await _network.CreateAsync();
         await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync());
-        await ApplyServiceRolesAsync();
+        await Task.WhenAll(ApplyServiceRolesAsync(), ApplyRabbitCargoUserAsync());
     }
 
     public async ValueTask DisposeAsync()
     {
         await _postgres.DisposeAsync();
         await _rabbit.DisposeAsync();
+        await _network.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Depodaki gerçek docker/rabbitmq/init-cargo-user.sh'yi compose'daki curl imajıyla çalıştırır; böylece
+    /// testler üretimdeki izinlerle (ör. varsayılan exchange'e yazma yok) cargo kullanıcısıyla bağlanır.
+    /// </summary>
+    private async Task ApplyRabbitCargoUserAsync()
+    {
+        var script = await File.ReadAllBytesAsync(FindRepoFile("docker", "rabbitmq", "init-cargo-user.sh"));
+        await using var init = new ContainerBuilder("curlimages/curl:8.17.0")
+            .WithNetwork(_network)
+            .WithResourceMapping(script, FilePath.Of("/init/init-cargo-user.sh"))
+            .WithEntrypoint("/bin/sh", "/init/init-cargo-user.sh")
+            .WithEnvironment("RABBITMQ_API", $"http://{RabbitAlias}:15672/api")
+            .WithEnvironment("RABBITMQ_ADMIN_USER", RabbitAdminUser)
+            .WithEnvironment("RABBITMQ_ADMIN_PASSWORD", RabbitAdminPassword)
+            .WithEnvironment("CARGO_USER", RabbitCargoUser)
+            .WithEnvironment("CARGO_PASSWORD", RabbitCargoPassword)
+            .Build();
+        await init.StartAsync();
+        var exitCode = await init.GetExitCodeAsync();
+        if (exitCode != 0)
+        {
+            var (_, stderr) = await init.GetLogsAsync();
+            throw new InvalidOperationException($"init-cargo-user.sh başarısız ({exitCode}): {stderr}");
+        }
     }
 
     private async Task ApplyServiceRolesAsync()
     {
-        var script = await File.ReadAllBytesAsync(FindServiceRolesSql());
+        var script = await File.ReadAllBytesAsync(FindRepoFile("docker", "postgres", "service-roles.sql"));
         await _postgres.CopyAsync(script, "/tmp/service-roles.sql");
 
         var result = await _postgres.ExecAsync(
@@ -82,16 +140,16 @@ public sealed class ContainersFixture : IAsyncLifetime
     }
 
     /// <summary>Test çıktı klasöründen yukarı çıkarak depodaki betiği bulur.</summary>
-    private static string FindServiceRolesSql()
+    private static string FindRepoFile(params string[] relative)
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "docker", "postgres", "service-roles.sql");
+            var candidate = Path.Combine([dir.FullName, .. relative]);
             if (File.Exists(candidate))
             {
                 return candidate;
             }
         }
-        throw new FileNotFoundException("docker/postgres/service-roles.sql bulunamadı.");
+        throw new FileNotFoundException(string.Join('/', relative) + " bulunamadı.");
     }
 }

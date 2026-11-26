@@ -8,7 +8,8 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Ayarlar: ConnectionStrings:Cargo yoksa ya da Carrier:Provider yok/tanınmıyorsa host başlarken OptionsValidationException ile durur.
+// Ayarlar: ConnectionStrings:Cargo yoksa, Carrier:Provider yok/tanınmıyorsa ya da diğer açılış kuralları (CargoOptions.Register)
+// sağlanmıyorsa host başlarken OptionsValidationException ile durur.
 CargoOptions.Register(builder.Services);
 
 // Bağlantı dizesi ayarlardan çözümlenir; böylece eksik ayar DI kaydında değil açılış doğrulamasında yakalanır.
@@ -71,6 +72,15 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => fa
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 
 app.MapFakeCarrierEndpoints();
+
+// Production'da sahte kargo firması servisi durdurmaz (gerçek firma bağlantısı henüz yok), ama her açılışta
+// uyarı loglanır: gönderiler gerçek bir firmaya iletilmez. Test uçlarının Production'da açılması ise
+// açılış doğrulamasında servisi durdurur (CargoOptions.Register).
+if (app.Environment.IsProduction() && CargoOptions.From(app.Services).Carrier.IsFake)
+{
+    app.Logger.LogWarning(
+        "Production ortamında Carrier:Provider=Fake (sahte kargo firması) seçili: gönderiler gerçek bir kargo firmasına iletilmez");
+}
 
 await app.RunAsync();
 

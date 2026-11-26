@@ -16,6 +16,12 @@ namespace CargoService.Shipping;
 ///    · FAILED ve DELIVERY_FAILED gönderide son değişikliğin (updated_at) üzerinden
 ///      <c>Workers:UndeliveredRecipientRetention</c> (varsayılan 90 gün) geçince. FAILED gönderi "Tekrar dene"
 ///      ile açılırsa yeni komut alıcıyı yeniden getirir. Süre veritabanı saatiyle (now()) ölçülür.
+///    · Üst sınır, durum ne olursa olsun (takılı kalan REQUESTED/SENDING/CREATED/IN_TRANSIT dahil): son
+///      değişikliğin üzerinden <c>Workers:StaleRecipientRetention</c> (varsayılan 180 gün) geçince. SENDING'de
+///      son değişiklik <c>sending_since</c>'tır (uzlaştırıcı her denemede updated_at'i yeniler). Durum
+///      DEĞİŞTİRİLMEZ; alıcısı olmayan REQUESTED/SENDING gönderiyi mevcut akış güvenle kapatır: worker ve
+///      uzlaştırıcı (firmada bulunamazsa) firmayı çağırmadan FAILED yapar ve shipment.failed yazar; uzlaştırıcı
+///      firmada bulursa gönderi CREATED olur (firmadaki kayıt kaybolmaz).
 ///    Gönderi satırı ve olayları silinmez.
 /// Her adım kendi tek ifadelik işleminde çalışır; tekrar çalıştırılması zararsızdır.
 /// </summary>
@@ -65,8 +71,17 @@ public sealed class Cleanup(
               AND recipient IS NOT NULL
             """, ct);
 
+        // updated_at yukarıdakiyle aynı nedenle değiştirilmez.
+        var staleRetention = options.Value.Workers.StaleRecipientRetention;
+        recipients += await db.Database.ExecuteSqlAsync($"""
+            UPDATE cargo.shipments SET recipient = NULL
+            WHERE recipient IS NOT NULL
+              AND CASE WHEN status = 'SENDING' THEN coalesce(sending_since, updated_at) ELSE updated_at END
+                  < now() - {staleRetention}
+            """, ct);
+
         logger.LogInformation(
-            "Temizlik: {ProcessedMessages} eski gelen mesaj kaydı ve {OutboxMessages} yayınlanmış olay silindi, {Recipients} kapanmış gönderinin alıcı bilgisi kaldırıldı",
+            "Temizlik: {ProcessedMessages} eski gelen mesaj kaydı ve {OutboxMessages} yayınlanmış olay silindi, {Recipients} gönderinin alıcı bilgisi kaldırıldı",
             processed, outbox, recipients);
         return new Result(processed, outbox, recipients);
     }

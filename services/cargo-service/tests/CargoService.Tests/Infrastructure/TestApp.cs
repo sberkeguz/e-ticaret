@@ -13,8 +13,8 @@ public sealed class TestApp(IReadOnlyDictionary<string, string?> settings, LogCa
     : WebApplicationFactory<Program>
 {
     /// <summary>
-    /// Kapsayıcılara bağlı, cargo_app rolüyle ve sahte kargo firmasıyla çalışan uygulama;
-    /// <paramref name="overrides"/> varsayılanların üzerine yazar.
+    /// Kapsayıcılara bağlı, cargo_app rolüyle, RabbitMQ'ya dar izinli cargo kullanıcısıyla ve sahte kargo
+    /// firmasıyla çalışan uygulama; <paramref name="overrides"/> varsayılanların üzerine yazar.
     /// </summary>
     public static TestApp For(
         ContainersFixture containers,
@@ -24,7 +24,7 @@ public sealed class TestApp(IReadOnlyDictionary<string, string?> settings, LogCa
         var values = new Dictionary<string, string?>
         {
             ["ConnectionStrings:Cargo"] = containers.CargoConnectionString,
-            ["RabbitMq:Url"] = containers.RabbitMqUrl,
+            ["RabbitMq:Url"] = containers.CargoRabbitMqUrl,
             // Carrier:Provider zorunludur ve varsayılanı yoktur; testler sahte firmayla çalışır.
             ["Carrier:Provider"] = "Fake",
         };

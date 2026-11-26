@@ -111,6 +111,39 @@ class ShipmentEventListenerTest {
         verify(retries).handleFailure(eq(message), any(), eq(false), eq(CargoTopology.EVENTS_ROUTE));
     }
 
+    /** Saklanan metinde yasak karakter (SafeText) kalıcıdır: tekrar denenmez, işleyiciye gitmeden DLQ. */
+    @Test
+    void storedTextWithForbiddenCharacterGoesToDeadLetters() {
+        // JSON kaçışları: NUL, BEL, C1 (U+0085), U+FFFD, eşsiz yüksek/düşük vekil.
+        for (String bad : new String[]{"\\u0000", "\\u0007", "\\u0085", "\\ufffd", "\\ud800", "\\udc00"}) {
+            for (String body : new String[]{
+                    CREATED_FROM_CARGO.replace("\"TK0000000001\"", "\"TK" + bad + "1\""),
+                    CREATED_FROM_CARGO.replace("\"Test Kargo\"", "\"Test" + bad + "Kargo\""),
+                    CREATED_FROM_CARGO.replace("\"carrierCode\":\"FAKE\"", "\"carrierCode\":\"FA" + bad + "KE\""),
+                    CREATED_FROM_CARGO.replace("\"type\":\"ShipmentCreated\"", "\"type\":\"Shipment" + bad + "\"")}) {
+                Message message = message(body, "m-1");
+                listener.onMessage(message);
+                verify(retries).handleFailure(eq(message), any(), eq(false), eq(CargoTopology.EVENTS_ROUTE));
+            }
+        }
+        Message badId = message(CREATED_FROM_CARGO, "m\u00001");
+        listener.onMessage(badId);
+        verify(retries).handleFailure(eq(badId), any(), eq(false), eq(CargoTopology.EVENTS_ROUTE));
+        verify(handler, never()).handle(anyString(), any());
+    }
+
+    /** failureReason saklanmaz; içindeki karakter olayı engellemez. Emoji ve Türkçe harf serbesttir. */
+    @Test
+    void unstoredFailureReasonAndEmojiAreAccepted() {
+        String body = CREATED_FROM_CARGO.replace("\"failureReason\":null", "\"failureReason\":\"x\\u0000y\"")
+                .replace("\"Test Kargo\"", "\"Çağrı Kargo \\ud83d\\ude00\"");
+
+        listener.onMessage(message(body, "m-1"));
+
+        verify(handler).handle(eq("m-1"), any());
+        verify(retries, never()).handleFailure(any(), any(), anyBoolean(), any());
+    }
+
     @Test
     void handlerDeadLetterIsNotRetried() {
         doThrow(ShipmentEventException.deadLetter("bilinmeyen sipariş")).when(handler).handle(anyString(), any());

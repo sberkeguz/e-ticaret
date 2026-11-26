@@ -96,6 +96,25 @@ class ShipmentRequestedContractTest {
         assertEquals(ShipmentRequested.RecipientProblem.MISSING, ShipmentRequested.Recipient.from(blank).problem());
     }
 
+    /** "Boş" = .NET string.IsNullOrWhiteSpace (char.IsWhiteSpace): her .NET boşluğu tek başına alanı boş yapar. */
+    @Test
+    void recipientBlankMatchesDotNetIsWhiteSpace() {
+        for (char space : CargoShipmentContract.DOTNET_WHITESPACE.toCharArray()) {
+            Order order = order();
+            order.setCity(" " + space + space);
+            assertEquals(ShipmentRequested.RecipientProblem.MISSING, ShipmentRequested.Recipient.from(order).problem(),
+                    "U+" + Integer.toHexString(space));
+            assertTrue(CargoShipmentContract.isNullOrWhiteSpace(order.getCity()));
+        }
+        // .NET'te boşluk sayılmayan görünmez karakterler (Cf): cargo-service kabul eder, backend de etmeli.
+        for (String notSpace : new String[]{"​", "﻿", "᠎", "⁠", " a "}) {
+            Order order = order();
+            order.setCity(notSpace);
+            assertEquals(null, ShipmentRequested.Recipient.from(order).problem(), notSpace);
+            assertFalse(CargoShipmentContract.isNullOrWhiteSpace(notSpace));
+        }
+    }
+
     private JsonNode writtenThroughOutbox(ShipmentRequested command) {
         OutboxMessageRepository repository = mock(OutboxMessageRepository.class);
         OutboxRelay relay = new OutboxRelay(repository, mock(RabbitTemplate.class), mock(TransactionTemplate.class));

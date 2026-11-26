@@ -111,6 +111,27 @@ class ShipmentViewsTest {
         assertEquals(AT, third.statusAt());
     }
 
+    /** canRetry, retry'ın kabul koşuluyla aynı: gönderi FAILED + sipariş PREPARING + ödeme PAID. */
+    @Test
+    void canRetryOnlyWhenFailedPreparingAndPaid() {
+        when(shipments.findAllByOrderIdIn(anyCollection())).thenReturn(List.of(shipment(1L, ShipmentStatus.FAILED),
+                shipment(2L, ShipmentStatus.FAILED), shipment(3L, ShipmentStatus.FAILED),
+                shipment(4L, ShipmentStatus.FAILED), shipment(5L, ShipmentStatus.CREATED)));
+        when(payments.findOrderIdsWithStatus(anyCollection(), eq(PaymentStatus.PAID))).thenReturn(List.of(1L, 2L, 3L, 5L));
+
+        List<AdminOrderResponse> items = views.adminPage(new OrderPageResponse(List.of(
+                order(1L, OrderStatus.PREPARING), // FAILED + PREPARING + PAID → true
+                order(2L, OrderStatus.CANCELLED), // iptal → false
+                order(3L, OrderStatus.SHIPPED),   // hazırlanmıyor → false
+                order(4L, OrderStatus.PREPARING), // ödeme PAID değil → false
+                order(5L, OrderStatus.PREPARING)), // gönderi FAILED değil → false
+                0, 50, 5, 1)).items();
+
+        assertEquals(List.of(true, false, false, false, false),
+                items.stream().map(item -> item.shipment().canRetry()).toList());
+        assertNotNull(items.get(1).shipment().failureReason(), "neden metni FAILED'da yine gösterilir");
+    }
+
     @Test
     void customerSeesOnlyShipmentsWithTrackingNumber() {
         OrderShipment requested = shipment(1L, ShipmentStatus.REQUESTED);

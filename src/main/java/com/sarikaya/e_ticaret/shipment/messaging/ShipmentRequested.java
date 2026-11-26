@@ -13,7 +13,8 @@ import java.util.UUID;
  * JSON camelCase; occurredAt ISO-8601 metin (milisaniyeye yuvarlanır); declaredValue JSON sayısı.
  * cargo-service'in Validate kuralları: messageId ≤100, type "ShipmentRequested", version ≥1,
  * requestNo ≥1, idempotencyKey tam "order-{orderId}", paymentStatus dolu (yalnız "PAID" kargoya verilir),
- * alıcının 7 alanı dolu ve {@link SafeText}'e uygun, itemCount ≥1, declaredValue ≥0.
+ * alıcının 7 alanı dolu (.NET string.IsNullOrWhiteSpace anlamında: {@link SafeText#isNullOrWhiteSpace}) ve
+ * {@link SafeText}'e uygun, itemCount ≥1, declaredValue ≥0.
  * recipient kişisel veridir: outbox satırından yayın onayından sonra silinir, loga girmez.
  */
 public record ShipmentRequested(String messageId, String type, int version, Instant occurredAt, String traceId,
@@ -42,7 +43,7 @@ public record ShipmentRequested(String messageId, String type, int version, Inst
         public RecipientProblem problem() {
             boolean missing = false;
             for (String value : new String[]{firstName, lastName, phone, city, district, neighborhood, address}) {
-                if (value == null || value.isBlank()) {
+                if (SafeText.isNullOrWhiteSpace(value)) {
                     missing = true;
                 } else if (!SafeText.isSafe(value)) {
                     return RecipientProblem.UNSAFE_CHARACTER;

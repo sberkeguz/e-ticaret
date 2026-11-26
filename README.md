@@ -43,13 +43,66 @@ Tarayıcı → Backend (8080) → IyzicoService (8081) → iyzico
 
 ### Veritabanı kullanıcıları
 
-Her servis yalnızca kendi şemasına erişir: backend `backend_app` (public), iyzico-service `iyzico_app` (iyzico).
+Her servis yalnızca kendi şemasına erişir: backend `backend_app` (public), iyzico-service `iyzico_app` (iyzico), cargo-service `cargo_app` (cargo).
 `POSTGRES_USER` (eticaret_user) süper kullanıcıdır, yalnızca yönetim (pgAdmin) içindir.
 Boş veritabanında kullanıcılar otomatik kurulur. Var olan bir veritabanına uygulamak için (tekrar çalıştırılabilir):
 
 ```bash
 docker compose cp docker/postgres/service-roles.sql postgres:/tmp/service-roles.sql
-docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_password=... -v iyzico_password=... -f /tmp/service-roles.sql
+docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_password=... -v iyzico_password=... -v cargo_password=... -f /tmp/service-roles.sql
+```
+
+### Kargo servisi ilk kurulum
+
+cargo-service (`services/cargo-service/`, .NET) için `.env` dosyasında şu değerler **zorunludur**; biri eksikse
+`docker compose` hiçbir servisi başlatmaz (varsayılan parola yoktur):
+
+| Değişken | Ne için |
+|---|---|
+| `CARGO_DB_PASSWORD` | `cargo_app` veritabanı kullanıcısı (yalnız `cargo` şeması) |
+| `RABBITMQ_CARGO_PASSWORD` | cargo-service'in kendi RabbitMQ kullanıcısı (`RABBITMQ_CARGO_USER`, varsayılan `cargo`). URL içinde gider: yalnız harf, rakam, `-`, `_` |
+| `CARGO_INTERNAL_TOKEN` | cargo-service iç uçlarının (`X-Internal-Token`) sırrı; `INTERNAL_API_TOKEN`'dan farklı olmalı |
+
+RabbitMQ kullanıcısını her `docker compose up`'ta `rabbitmq-init` kurar (tekrar çalıştırılabilir; parola
+değişirse günceller). Bu kullanıcı yalnız `cargo.*` kuyruk/exchange'lerine erişir ve `cargo` exchange'ine yalnız
+`shipment.*` olayları yayınlayabilir; ödeme kuyruklarını okuyamaz, kargo komutu (`commands.shipment.create`) gönderemez.
+Varsayılan exchange'e (`""`, `amq.default`) yazma izni yoktur; bu yüzden başka servislerin kuyruklarına
+(ör. `iyzico.charge-requests`) mesaj bırakamaz. Komut kuyruğunun DLQ'su adlı `cargo.dlx`, yeniden denemesi adlı
+`cargo.retry` exchange'i üzerinden gider. İzin tablosu `docker/rabbitmq/init-cargo-user.sh`'nin başındadır.
+
+#### Geçiş: `cargo.shipment-requests` kuyruğunun yeni argümanları
+
+Bu sürümde `cargo.shipment-requests` kuyruğunun `x-dead-letter-exchange` argümanı `""` yerine `cargo.dlx` oldu.
+Broker'da kuyruk eski argümanlarla duruyorsa backend ve cargo-service onu tanımlarken `PRECONDITION_FAILED`
+(406) alır ve komut dinlenmez. RabbitMQ kuyruk argümanını değiştirmeye izin vermez; kuyruk **boşken** silinip
+yeni sürümle yeniden tanımlanmalıdır. Kod kuyruğu kendiliğinden silmez (veri kaybı olmasın diye). Bir kez:
+
+```bash
+# 1. Yeni komut gelmesin, eski cargo-service kuyruğu boşaltsın: önce backend'i durdur, cargo-service (eski sürüm) çalışırken bekle.
+docker compose stop backend
+# 2. Kuyrukta bekleyen ya da onaylanmamış mesaj olmadığını doğrula (messages ve messages_unacknowledged 0 olmalı).
+docker compose exec rabbitmq rabbitmqctl list_queues name messages messages_unacknowledged arguments
+# 3. cargo-service'i durdur ve kuyruğu YALNIZ BOŞSA sil (--if-empty: mesaj varsa RabbitMQ silmeyi reddeder).
+docker compose stop cargo-service
+docker compose exec rabbitmq rabbitmqctl delete_queue --if-empty cargo.shipment-requests
+# 4. Yeni sürümle başlat: rabbitmq-init izinleri günceller, servisler kuyruğu yeni argümanlarla tanımlar.
+docker compose up -d --build
+```
+
+HTTP API ile 3. adımın karşılığı: `DELETE http://localhost:15672/api/queues/%2F/cargo.shipment-requests?if-empty=true`
+(yönetici kullanıcısıyla). **Kuyrukta mesaj varsa silme:** önce eski cargo-service'in kuyruğu boşaltmasını bekle
+ya da mesajları yönetim arayüzünden (*Move messages*, shovel eklentisi) geçici bir kuyruğa taşı, kuyruk yeniden
+tanımlandıktan sonra geri taşı. `cargo.shipment-requests.dlq` kuyruğu değişmez (argümansız, yalnız yeni bir bağ alır);
+silinmez.
+
+Veritabanı daha önce (cargo_app olmadan) oluşturulduysa `cargo_app` rolünü bir kez kurun
+(`.env`'deki `CARGO_DB_PASSWORD` ile aynı parola; diğer iki parola da mevcut değerleri olmalı, komut onları yeniden yazar):
+
+```bash
+docker compose up -d postgres
+docker compose cp docker/postgres/service-roles.sql postgres:/tmp/service-roles.sql
+docker compose exec postgres psql -U eticaret_user -d eticaret -v backend_password=... -v iyzico_password=... -v cargo_password=... -f /tmp/service-roles.sql
+docker compose up -d --build cargo-service
 ```
 
 ### Ödeme akışı

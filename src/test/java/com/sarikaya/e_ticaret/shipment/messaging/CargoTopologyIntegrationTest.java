@@ -40,6 +40,8 @@ class CargoTopologyIntegrationTest {
             channel.queueDeclarePassive("cargo.unrouted");
             channel.queueDeclarePassive("cargo.shipment-requests");
             channel.queueDeclarePassive("cargo.shipment-requests.dlq");
+            channel.exchangeDeclarePassive("cargo.dlx");
+            channel.exchangeDeclarePassive("cargo.retry");
 
             declareLikeCargoService(channel);
             return null;
@@ -90,6 +92,41 @@ class CargoTopologyIntegrationTest {
         });
     }
 
+    /**
+     * cargo-service varsayılan exchange'e ("") yazamaz: reddedilen komut adlı DLX (cargo.dlx) üzerinden DLQ'ya,
+     * tanınmayan hatadaki yeniden yayın adlı retry exchange'i (cargo.retry) üzerinden komut kuyruğuna gider.
+     */
+    @Test
+    void rejectedCommandGoesToDlqViaNamedDlxAndRetryExchangeRoutesToRequestQueue() {
+        rabbit.execute(channel -> {
+            channel.queuePurge("cargo.shipment-requests");
+            channel.queuePurge("cargo.shipment-requests.dlq");
+
+            channel.basicPublish("cargo.retry", "cargo.shipment-requests", null, "{}".getBytes(StandardCharsets.UTF_8));
+            GetResponse retried = poll(channel, "cargo.shipment-requests");
+            assertNotNull(retried, "cargo.retry'ye yayınlanan kopya komut kuyruğuna düşmeli");
+
+            channel.basicReject(retried.getEnvelope().getDeliveryTag(), false);
+            GetResponse dead = poll(channel, "cargo.shipment-requests.dlq");
+            assertNotNull(dead, "reddedilen komut cargo.dlx üzerinden DLQ'ya düşmeli");
+            assertEquals("cargo.shipment-requests", dead.getProps().getHeaders().get("x-first-death-queue").toString());
+            assertEquals("rejected", dead.getProps().getHeaders().get("x-first-death-reason").toString());
+            channel.basicAck(dead.getEnvelope().getDeliveryTag(), false);
+            return null;
+        });
+    }
+
+    private static GetResponse poll(Channel channel, String queue) throws java.io.IOException {
+        GetResponse got = null;
+        for (int i = 0; i < 50 && got == null; i++) {
+            got = channel.basicGet(queue, false);
+            if (got == null) {
+                sleep();
+            }
+        }
+        return got;
+    }
+
     /** CargoTopology.DeclareAsync'in birebir Java karşılığı. */
     private static void declareLikeCargoService(Channel channel) throws java.io.IOException {
         channel.exchangeDeclare("cargo.unrouted", "fanout", true, false, null);
@@ -97,13 +134,17 @@ class CargoTopologyIntegrationTest {
         channel.queueBind("cargo.unrouted", "cargo.unrouted", "");
 
         channel.exchangeDeclare("cargo", "topic", true, false, Map.of("alternate-exchange", "cargo.unrouted"));
+        channel.exchangeDeclare("cargo.dlx", "direct", true, false, null);
+        channel.exchangeDeclare("cargo.retry", "direct", true, false, null);
 
         channel.queueDeclare("cargo.shipment-requests.dlq", true, false, false, null);
+        channel.queueBind("cargo.shipment-requests.dlq", "cargo.dlx", "cargo.shipment-requests.dlq");
         Map<String, Object> arguments = new HashMap<>();
-        arguments.put("x-dead-letter-exchange", "");
+        arguments.put("x-dead-letter-exchange", "cargo.dlx");
         arguments.put("x-dead-letter-routing-key", "cargo.shipment-requests.dlq");
         channel.queueDeclare("cargo.shipment-requests", true, false, false, arguments);
         channel.queueBind("cargo.shipment-requests", "cargo", "commands.shipment.create");
+        channel.queueBind("cargo.shipment-requests", "cargo.retry", "cargo.shipment-requests");
     }
 
     private static void sleep() {

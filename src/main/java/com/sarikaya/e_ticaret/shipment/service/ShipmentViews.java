@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * Siparişlere kargo görünümü ekler. Gönderiler ve ödeme durumları sayfa başına tek sorguyla yüklenir
  * (sipariş başına sorgu yok).
  *  - Yönetici: canShip = PREPARING + ödeme PAID + gönderi yok; gönderide failureReason (yalnız FAILED,
- *    sabit metin) ve canRetry (yalnız FAILED).
+ *    sabit metin) ve canRetry = FAILED + PREPARING + ödeme PAID (retry'ın kabul koşuluyla aynı).
  *  - Müşteri (S1): yalnız CREATED / IN_TRANSIT / DELIVERED / DELIVERY_FAILED ve takip no doluyken
  *    gösterilir; REQUESTED, FAILED ya da takip nosuz gönderi null'dır.
  */
@@ -74,8 +74,8 @@ public class ShipmentViews {
         Set<Long> paid = new HashSet<>(payments.findOrderIdsWithStatus(ids(orders), PaymentStatus.PAID));
         return orders.stream().map(order -> {
             OrderShipment shipment = byOrder.get(order.id());
-            boolean canShip = shipment == null && order.status() == OrderStatus.PREPARING && paid.contains(order.id());
-            return AdminOrderResponse.of(order, canShip, adminView(shipment));
+            boolean eligible = order.status() == OrderStatus.PREPARING && paid.contains(order.id());
+            return AdminOrderResponse.of(order, shipment == null && eligible, adminView(shipment, eligible));
         }).toList();
     }
 
@@ -88,14 +88,16 @@ public class ShipmentViews {
         return orders.stream().map(OrderResponse::id).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private AdminShipment adminView(OrderShipment shipment) {
+    /** eligible: sipariş PREPARING ve ödeme PAID (ShipmentService.retry'ın kabul koşulu). */
+    private AdminShipment adminView(OrderShipment shipment, boolean eligible) {
         if (shipment == null) {
             return null;
         }
         boolean failed = shipment.getStatus() == ShipmentStatus.FAILED;
         return new AdminShipment(shipment.getStatus(), shipment.getCarrierName(), shipment.getTrackingNumber(),
                 trackingUrls.urlFor(shipment.getCarrierCode(), shipment.getTrackingNumber()), shipment.getStatusAt(),
-                shipment.getRequestNo(), failed ? FailureTexts.forCode(shipment.getFailureCode()) : null, failed);
+                shipment.getRequestNo(), failed ? FailureTexts.forCode(shipment.getFailureCode()) : null,
+                failed && eligible);
     }
 
     private CustomerShipment customerView(OrderShipment shipment) {

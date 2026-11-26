@@ -36,7 +36,7 @@ public final class CargoShipmentContract {
     public static List<String> validate(JsonNode command) {
         List<String> errors = new ArrayList<>();
         String messageId = text(command, "messageId");
-        if (messageId == null || messageId.isBlank() || messageId.length() > 100 || !isSafe(messageId)) {
+        if (isNullOrWhiteSpace(messageId) || messageId.length() > 100 || !isSafe(messageId)) {
             errors.add("messageId");
         }
         JsonNode traceId = command.get("traceId");
@@ -66,7 +66,7 @@ public final class CargoShipmentContract {
             errors.add("idempotencyKey");
         }
         String paymentStatus = text(command, "paymentStatus");
-        if (paymentStatus == null || paymentStatus.isBlank()) {
+        if (isNullOrWhiteSpace(paymentStatus)) {
             errors.add("paymentStatus");
         }
         JsonNode recipient = command.get("recipient");
@@ -75,7 +75,7 @@ public final class CargoShipmentContract {
         } else {
             for (String field : RECIPIENT_FIELDS) {
                 String value = text(recipient, field);
-                if (value == null || value.isBlank() || !isSafe(value)) {
+                if (isNullOrWhiteSpace(value) || !isSafe(value)) {
                     errors.add("recipient." + field);
                 }
             }
@@ -113,6 +113,18 @@ public final class CargoShipmentContract {
                 shape.put(path, field.getValue().getNodeType());
             }
         }
+    }
+
+    /**
+     * .NET char.IsWhiteSpace'in true döndüğü karakterlerin tam listesi (belgelenen liste, üretim kodundan
+     * bağımsız yazıldı): Zs, Zl (U+2028), Zp (U+2029), U+0009–U+000D, U+0085.
+     */
+    public static final String DOTNET_WHITESPACE = "          "
+            + "      　  \u0009\n\u000B\u000C\r\u0085";
+
+    /** .NET string.IsNullOrWhiteSpace: null, boş ya da yalnız {@link #DOTNET_WHITESPACE} karakterleri. */
+    public static boolean isNullOrWhiteSpace(String text) {
+        return text == null || text.chars().allMatch(c -> DOTNET_WHITESPACE.indexOf(c) >= 0);
     }
 
     /** SafeText.IsSafe: C0 (\t \n \r hariç), DEL, C1, eşsiz vekil, U+FFFD, U+FFFE, U+FFFF yasak. */

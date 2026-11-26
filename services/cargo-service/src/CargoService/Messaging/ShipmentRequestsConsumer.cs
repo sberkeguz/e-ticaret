@@ -173,10 +173,12 @@ public sealed class ShipmentRequestsConsumer(
     }
 
     /// <summary>
-    /// Kopyayı <see cref="CommandFailures.AttemptsHeader"/> = <paramref name="attempts"/> ile varsayılan
-    /// exchange üzerinden aynı kuyruğa yayınlar, broker onayını (publisher confirm) bekler, SONRA aslını
-    /// onaylar. Yayın başarısızsa aslı nack(requeue) edilir. Onaydan sonra ack'ten önce düşülürse ikisi de
-    /// kuyrukta kalır; aynı messageId processed_messages sayesinde bir kez işlenir.
+    /// Kopyayı <see cref="CommandFailures.AttemptsHeader"/> = <paramref name="attempts"/> ile
+    /// <see cref="CargoTopology.RetryExchange"/> üzerinden aynı kuyruğa yayınlar (cargo kullanıcısının varsayılan
+    /// exchange'e yazma izni yoktur), broker onayını (publisher confirm) bekler, SONRA aslını onaylar. Yayın
+    /// başarısızsa ya da kopya hiçbir kuyruğa yönlenemezse (mandatory; ör. retry bağı silinmiş) aslı
+    /// nack(requeue) edilir, kopya kaybolmaz. Onaydan sonra ack'ten önce düşülürse ikisi de kuyrukta kalır; aynı
+    /// messageId processed_messages sayesinde bir kez işlenir.
     /// </summary>
     private static async Task RepublishWithAttemptsAsync(IChannel channel, BasicDeliverEventArgs delivery, int attempts)
     {
@@ -190,8 +192,8 @@ public sealed class ShipmentRequestsConsumer(
         try
         {
             using var timeout = new CancellationTokenSource(ConfirmTimeout);
-            await channel.BasicPublishAsync("", CargoTopology.ShipmentRequestsQueue, mandatory: false, props,
-                delivery.Body, timeout.Token);
+            await channel.BasicPublishAsync(CargoTopology.RetryExchange, CargoTopology.ShipmentRequestsQueue,
+                mandatory: true, props, delivery.Body, timeout.Token);
         }
         catch (Exception)
         {

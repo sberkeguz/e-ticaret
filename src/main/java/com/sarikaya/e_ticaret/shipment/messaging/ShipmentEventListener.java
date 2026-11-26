@@ -8,8 +8,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * backend.shipment-events dinleyicisi. Okunamayan, zorunlu alanı eksik ya da numarasız (messageId) mesaj
- * beklemekle düzelmez → DLQ. İşleyicinin beklenmedik hatası (ör. veritabanına ulaşılamadı) → kargo
+ * backend.shipment-events dinleyicisi. Okunamayan, zorunlu alanı eksik, numarasız (messageId) ya da saklanan
+ * metninde yasak karakter (SafeText) olan mesaj beklemekle düzelmez → DLQ. İşleyicinin beklenmedik hatası (ör. veritabanına ulaşılamadı) → kargo
  * rotasının bekleme kuyruklarıyla tekrar deneme. Gövde loglanmaz.
  */
 @Component
@@ -28,7 +28,9 @@ public class ShipmentEventListener {
     public void onMessage(Message message) {
         try {
             ShipmentEvent event = parse(message);
-            handler.handle(messageId(message, event), event);
+            String messageId = messageId(message, event);
+            requireSafeStoredText(messageId, event);
+            handler.handle(messageId, event);
         } catch (ShipmentEventException failure) {
             retries.handleFailure(message, failure, failure.retryable(), CargoTopology.EVENTS_ROUTE);
         } catch (RuntimeException failure) {
@@ -50,6 +52,22 @@ public class ShipmentEventListener {
             throw ShipmentEventException.deadLetter("Gönderi olayında zorunlu alanlar eksik.");
         }
         return event;
+    }
+
+    /**
+     * Veritabanına yazılan metinlerde (messageId, type, carrierCode, carrierName, trackingNumber) {@link SafeText}
+     * yasak karakteri varsa olay her denemede aynı yerde düşer (ör. PostgreSQL NUL'u reddeder) → DLQ.
+     * failureReason saklanmadığı için denetlenmez. Hata metni alan adını söyler, değeri yazmaz.
+     */
+    private static void requireSafeStoredText(String messageId, ShipmentEvent event) {
+        ShipmentEvent.Data data = event.data();
+        String[][] fields = {{"messageId", messageId}, {"type", event.type()}, {"carrierCode", data.carrierCode()},
+                {"carrierName", data.carrierName()}, {"trackingNumber", data.trackingNumber()}};
+        for (String[] field : fields) {
+            if (!SafeText.isSafe(field[1])) {
+                throw ShipmentEventException.deadLetter("Gönderi olayında " + field[0] + " izin verilmeyen karakter içeriyor.");
+            }
+        }
     }
 
     /** Asıl numara AMQP messageId özelliğidir; yoksa gövdedekine bakılır. */

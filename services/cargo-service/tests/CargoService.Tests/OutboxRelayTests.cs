@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace CargoService.Tests;
 
+// Test anahtarları "shipment." ile başlar: uygulama dar izinli cargo kullanıcısıyla bağlanır ve "cargo"
+// exchange'ine yalnız "shipment.*" yayınlayabilir (init-cargo-user.sh konu izni).
 [Collection("Integration")]
 public sealed class OutboxRelayTests(ContainersFixture containers)
 {
@@ -17,7 +19,7 @@ public sealed class OutboxRelayTests(ContainersFixture containers)
         await using var app = TestApp.For(containers);
         _ = app.Services; // uygulamayı açar (migration)
         await using var rabbit = await RabbitTestClient.ConnectAsync(containers);
-        var routingKey = $"test.relay.{Guid.NewGuid():N}";
+        var routingKey = $"shipment.test.relay.{Guid.NewGuid():N}";
         var queue = await rabbit.BindTemporaryQueueAsync(routingKey);
         var id = await Db.InsertOutboxAsync(containers, routingKey, TraceId);
 
@@ -41,7 +43,7 @@ public sealed class OutboxRelayTests(ContainersFixture containers)
     public async Task RabbitMQ_ulaşılamazken_satır_bekler_hata_sayacı_dolar_ulaşılınca_gider()
     {
         await using var rabbit = await RabbitTestClient.ConnectAsync(containers);
-        var routingKey = $"test.relay.{Guid.NewGuid():N}";
+        var routingKey = $"shipment.test.relay.{Guid.NewGuid():N}";
         var queue = await rabbit.BindTemporaryQueueAsync(routingKey);
 
         await using (var down = TestApp.For(containers, new Dictionary<string, string?> { ["RabbitMq:Url"] = UnreachableRabbit }))
@@ -77,7 +79,7 @@ public sealed class OutboxRelayTests(ContainersFixture containers)
         await using var app = TestApp.For(containers);
         _ = app.Services;
         var relay = Relay(app);
-        var routingKey = $"test.relay.{Guid.NewGuid():N}";
+        var routingKey = $"shipment.test.relay.{Guid.NewGuid():N}";
         var first = await Db.InsertOutboxAsync(containers, routingKey);
         await relay.RunOnceAsync(TestContext.Current.CancellationToken);
         Assert.NotNull(await Db.ScalarAsync<DateTime?>(containers,
@@ -104,7 +106,7 @@ public sealed class OutboxRelayTests(ContainersFixture containers)
         await using var app = TestApp.For(containers);
         _ = app.Services;
         await using var rabbit = await RabbitTestClient.ConnectAsync(containers);
-        var id = await Db.InsertOutboxAsync(containers, $"test.nobody.{Guid.NewGuid():N}");
+        var id = await Db.InsertOutboxAsync(containers, $"shipment.test.nobody.{Guid.NewGuid():N}");
 
         await Relay(app).RunOnceAsync(TestContext.Current.CancellationToken);
 
@@ -119,7 +121,7 @@ public sealed class OutboxRelayTests(ContainersFixture containers)
         _ = appA.Services;
         _ = appB.Services;
         await using var rabbit = await RabbitTestClient.ConnectAsync(containers);
-        var routingKey = $"test.relay.{Guid.NewGuid():N}";
+        var routingKey = $"shipment.test.relay.{Guid.NewGuid():N}";
         var queue = await rabbit.BindTemporaryQueueAsync(routingKey);
         var ids = new List<Guid>();
         for (var i = 0; i < 45; i++)
